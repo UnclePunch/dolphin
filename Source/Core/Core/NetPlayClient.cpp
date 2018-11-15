@@ -37,6 +37,7 @@
 #include "Core/Config/NetplaySettings.h"
 #include "Core/ConfigManager.h"
 #include "Core/GeckoCode.h"
+#include "Core/GeckoCodeConfig.h"
 #include "Core/HW/EXI/EXI_DeviceIPL.h"
 #include "Core/HW/SI/SI.h"
 #include "Core/HW/SI/SI_DeviceGCController.h"
@@ -556,6 +557,60 @@ unsigned int NetPlayClient::OnData(sf::Packet& packet)
 
       m_net_settings.m_IsHosting = m_local_player->IsHost();
       m_net_settings.m_HostInputAuthority = m_host_input_authority;
+    }
+
+    // Turn on this player's KAR Fullscreen code if playing KAR
+    {
+      // Am I Playing KAR?
+      const auto game = m_dialog->FindGameFile(m_selected_game);
+      auto game_id = game->GetGameID();
+      auto revision = game->GetRevision();
+      if (game_id == "GKYE01" || game_id == "KHPE01")
+      {
+        // Find Which Port I Am
+        s8 port = -1;
+        for (int i = 0; i < 4; i++)
+        {
+          if (m_pad_map[i] == m_local_player->pid)
+          {
+            port = i + 1;
+            break;
+          }
+        }
+
+        if (port != -1)
+        {
+          // Load Gecko Codes
+          IniFile game_ini_local;
+          game_ini_local.Load(File::GetUserPath(D_GAMESETTINGS_IDX) + game_id + ".ini");
+          IniFile game_ini_default;
+          game_ini_default = SConfig::GetInstance().LoadDefaultGameIni(game_id, revision);
+          std::vector<Gecko::GeckoCode> gecko_codes =
+              Gecko::LoadCodes(game_ini_default, game_ini_local);
+
+          // Untoggle all fullscreen codes
+          for (Gecko::GeckoCode& gecko_code : gecko_codes)
+          {
+            if (gecko_code.name == "P1 Fullscreen" || gecko_code.name == "P2 Fullscreen" ||
+                gecko_code.name == "P3 Fullscreen" || gecko_code.name == "P4 Fullscreen")
+              gecko_code.enabled = false;
+          }
+
+          // Look for my fullscreen code
+          std::string codename = "P";
+          codename += std::to_string(port);
+          codename += " Fullscreen";
+
+          for (Gecko::GeckoCode& gecko_code : gecko_codes)
+          {
+            if (gecko_code.name == codename)
+              gecko_code.enabled = true;
+          }
+          // Save Codes
+          Gecko::SaveCodes(game_ini_local, gecko_codes);
+          game_ini_local.Save(File::GetUserPath(D_GAMESETTINGS_IDX) + game_id + ".ini");
+        }
+      }
     }
 
     m_dialog->OnMsgStartGame();
