@@ -156,6 +156,15 @@ static Installation InstallCodeHandlerLocked()
       INSTALLER_BASE_ADDRESS + static_cast<u32>(data.size()) - CODE_SIZE;
   u32 codelist_end_address = INSTALLER_END_ADDRESS;
 
+   // Override Melee Gecko Code Region
+  if (SConfig::GetInstance().GetGameID() == "GALE01")
+  {
+    codelist_base_address = 0x801910E0;
+    codelist_end_address = 0x8019AF4C;
+    PowerPC::HostWrite_U32(0x3DE08019, 0x80001904);
+    PowerPC::HostWrite_U32(0x61EF10E0, 0x80001908);
+  }
+
   // Write a magic value to 'gameid' (codehandleronly does not actually read this).
   // This value will be read back and modified over time by HLE_Misc::GeckoCodeHandlerICacheFlush.
   PowerPC::HostWrite_U32(MAGIC_GAMEID, INSTALLER_BASE_ADDRESS);
@@ -168,16 +177,6 @@ static Installation InstallCodeHandlerLocked()
   const u32 start_address = codelist_base_address + CODE_SIZE;
   const u32 end_address = codelist_end_address - CODE_SIZE;
   u32 next_address = start_address;
-
-    // Override Melee Gecko Code Region
-  if (SConfig::GetInstance().GetGameID() == "GALE01")
-  {
-    codelist_base_address = 0x801910E0;
-    codelist_end_address = 0x8019AF4C;
-    PowerPC::HostWrite_U32(0x3DE08019, 0x80001904);
-    PowerPC::HostWrite_U32(0x61EF10E0, 0x80001908);
-  }
-
 
   // NOTE: Only active codes are in the list
   for (const GeckoCode& active_code : s_active_codes)
