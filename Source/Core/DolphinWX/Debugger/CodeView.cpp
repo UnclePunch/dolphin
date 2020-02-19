@@ -54,6 +54,7 @@ enum
   IDM_PATCHALERT,
   IDM_COPYFUNCTION,
   IDM_ADDFUNCTION,
+  IDM_COPYRAWFUNCTION,
 };
 
 CCodeView::CCodeView(DebugInterface* debuginterface, SymbolDB* symboldb, wxWindow* parent,
@@ -286,6 +287,28 @@ void CCodeView::OnPopupMenu(wxCommandEvent& event)
     }
   }
   break;
+
+  case IDM_COPYRAWFUNCTION:
+  {
+    Symbol* symbol = m_symbol_db->GetSymbolFromAddr(m_selection);
+    if (symbol)
+    {
+      std::string text;
+      text = text + symbol->name + "\r\n";
+      // we got a function
+      u32 start = symbol->address;
+      u32 end = start + symbol->size;
+      for (u32 addr = start; addr != end; addr += 4)
+      {
+        std::string disasm = m_debugger->Disassemble(addr);
+        text += disasm + "\r\n";
+      }
+      wxClipboardLocker locker;
+      wxTheClipboard->SetData(new wxTextDataObject(StrToWxStr(text)));
+    }
+  }
+  break;
+
 #endif
 
   case IDM_RUNTOHERE:
@@ -437,6 +460,7 @@ void CCodeView::OnMouseUpR(wxMouseEvent& event)
 #if wxUSE_CLIPBOARD
   menu.Append(IDM_COPYADDRESS, _("&Copy address"));
   menu.Append(IDM_COPYFUNCTION, _("Copy &function"))->Enable(isSymbol);
+  menu.Append(IDM_COPYRAWFUNCTION, _("Copy &raw function"))->Enable(isSymbol);
   menu.Append(IDM_COPYCODE, _("Copy code &line"));
   menu.Append(IDM_COPYHEX, _("Copy &hex"));
   menu.AppendSeparator();
