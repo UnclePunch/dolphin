@@ -117,9 +117,26 @@ static Installation InstallCodeHandlerLocked()
     }
   }
 
-  const u32 codelist_base_address =
+  u32 codelist_base_address =
       INSTALLER_BASE_ADDRESS + static_cast<u32>(data.size()) - CODE_SIZE;
-  const u32 codelist_end_address = INSTALLER_END_ADDRESS;
+  u32 codelist_end_address = INSTALLER_END_ADDRESS;
+
+  	if (SConfig::GetInstance().GetGameID() == "GALE01")
+  {
+    // Move Gecko code handler to the tournament mode region
+    codelist_base_address = 0x801910E0;
+    codelist_end_address = 0x8019AF4C;
+    PowerPC::HostWrite_U32(0x3DE08019, 0x80001f58);
+    PowerPC::HostWrite_U32(0x61EF10E0, 0x80001f5C);
+
+    // Here we are replacing a line in the codehandler with a blr.
+    // The reason for this is that this is the section of the codehandler
+    // that attempts to read/write commands for the USB Gecko. These calls
+    // were sometimes interfering with the Slippi EXI calls and causing
+    // the game to loop infinitely in EXISync.
+    PowerPC::HostWrite_U32(0x4E800020, 0x80001D6C);
+  }
+
 
   // Write a magic value to 'gameid' (codehandleronly does not actually read this).
   // This value will be read back and modified over time by HLE_Misc::GeckoCodeHandlerICacheFlush.
@@ -155,6 +172,8 @@ static Installation InstallCodeHandlerLocked()
       next_address += CODE_SIZE;
     }
   }
+
+
 
   WARN_LOG(ACTIONREPLAY, "GeckoCodes: Using %u of %u bytes", next_address - start_address,
            end_address - start_address);
