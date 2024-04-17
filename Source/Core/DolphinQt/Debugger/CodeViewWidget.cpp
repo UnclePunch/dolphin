@@ -1109,7 +1109,7 @@ void CodeViewWidget::wheelEvent(QWheelEvent* event)
   Update();
 }
 
-void CodeViewWidget::mousePressEvent(QMouseEvent* event)
+void CodeViewWidget::mouseReleaseEvent(QMouseEvent* event)
 {
   auto* item = itemAt(event->pos());
   if (item == nullptr)

@@ -70,7 +70,7 @@ private:
 
   void resizeEvent(QResizeEvent*) override;
   void keyPressEvent(QKeyEvent* event) override;
-  void mousePressEvent(QMouseEvent* event) override;
+  void mouseReleaseEvent(QMouseEvent* event) override;
   void wheelEvent(QWheelEvent* event) override;
   void showEvent(QShowEvent* event) override;
 
