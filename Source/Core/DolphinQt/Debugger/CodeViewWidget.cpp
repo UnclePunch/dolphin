@@ -379,7 +379,7 @@ void CodeViewWidget::Update(const Core::CPUThreadGuard* guard)
       branch.is_link = IsBranchInstructionWithLink(ins);
 
       description_item->setText(
-          tr("--> %1").arg(QtUtils::FromStdString(debug_interface.GetDescription(branch_addr))));
+          tr("____%1").arg(QtUtils::FromStdString(debug_interface.GetDescription(branch_addr))));
       param_item->setForeground(dark_theme ? QColor(255, 135, 255) : Qt::magenta);
     }
 
