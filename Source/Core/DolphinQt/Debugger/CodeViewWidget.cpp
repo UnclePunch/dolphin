@@ -380,6 +380,8 @@ void CodeViewWidget::Update(const Core::CPUThreadGuard* guard)
 
       description_item->setText(
           tr("____%1").arg(QtUtils::FromStdString(debug_interface.GetDescription(branch_addr))));
+
+      description_item->setForeground(dark_theme ? QColor(135, 255, 255) : Qt::blue);
       param_item->setForeground(dark_theme ? QColor(255, 135, 255) : Qt::magenta);
     }
 
