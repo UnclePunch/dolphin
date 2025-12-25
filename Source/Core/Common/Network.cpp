@@ -36,10 +36,10 @@ MACAddress GenerateMacAddress(const MACConsumer type)
   switch (type)
   {
   case MACConsumer::BBA:
-    std::copy(oui_bba.begin(), oui_bba.end(), mac.begin());
+    std::ranges::copy(oui_bba, mac.begin());
     break;
   case MACConsumer::IOS:
-    std::copy(oui_ios.begin(), oui_ios.end(), mac.begin());
+    std::ranges::copy(oui_ios, mac.begin());
     break;
   }
 
@@ -84,6 +84,21 @@ std::optional<MACAddress> StringToMacAddress(std::string_view mac_string)
     return std::nullopt;
 
   return std::make_optional(mac);
+}
+
+std::string BluetoothAddressToString(BluetoothAddress bdaddr)
+{
+  std::ranges::reverse(bdaddr);
+  return MacAddressToString(std::bit_cast<MACAddress>(bdaddr));
+}
+
+std::optional<BluetoothAddress> StringToBluetoothAddress(std::string_view str)
+{
+  auto result = StringToMacAddress(str);
+  if (!result)
+    return std::nullopt;
+  std::ranges::reverse(*result);
+  return std::bit_cast<BluetoothAddress>(*result);
 }
 
 EthernetHeader::EthernetHeader() = default;
@@ -293,7 +308,7 @@ u16 ComputeNetworkChecksum(const void* data, u16 length, u32 initial_value)
 {
   u32 checksum = initial_value;
   std::size_t index = 0;
-  const std::string_view data_view{reinterpret_cast<const char*>(data), length};
+  const std::string_view data_view{static_cast<const char*>(data), length};
   for (u8 b : data_view)
   {
     const bool is_hi = index++ % 2 == 0;

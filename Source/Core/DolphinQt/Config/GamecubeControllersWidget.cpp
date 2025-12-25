@@ -24,7 +24,6 @@
 #include "DolphinQt/Config/Mapping/GCPadWiiUConfigDialog.h"
 #include "DolphinQt/Config/Mapping/MappingWindow.h"
 #include "DolphinQt/QtUtils/NonDefaultQPushButton.h"
-#include "DolphinQt/QtUtils/SetWindowDecorations.h"
 #include "DolphinQt/QtUtils/SignalBlocking.h"
 #include "DolphinQt/Settings.h"
 
@@ -34,7 +33,8 @@ using SIDeviceName = std::pair<SerialInterface::SIDevices, const char*>;
 static constexpr std::array s_gc_types = {
     SIDeviceName{SerialInterface::SIDEVICE_NONE, _trans("None")},
     SIDeviceName{SerialInterface::SIDEVICE_GC_CONTROLLER, _trans("Standard Controller")},
-    SIDeviceName{SerialInterface::SIDEVICE_WIIU_ADAPTER, _trans("GameCube Adapter for Wii U")},
+    SIDeviceName{SerialInterface::SIDEVICE_WIIU_ADAPTER,
+                 _trans("GameCube Controller Adapter (USB)")},
     SIDeviceName{SerialInterface::SIDEVICE_GC_STEERING, _trans("Steering Wheel")},
     SIDeviceName{SerialInterface::SIDEVICE_DANCEMAT, _trans("Dance Mat")},
     SIDeviceName{SerialInterface::SIDEVICE_GC_TARUKONGA, _trans("DK Bongos")},
@@ -139,7 +139,6 @@ void GamecubeControllersWidget::OnGCPadConfigure(size_t index)
   case SerialInterface::SIDEVICE_WIIU_ADAPTER:
   {
     GCPadWiiUConfigDialog dialog(static_cast<int>(index), this);
-    SetQWidgetWindowDecorations(&dialog);
     dialog.exec();
     return;
   }
@@ -165,7 +164,6 @@ void GamecubeControllersWidget::OnGCPadConfigure(size_t index)
   MappingWindow* window = new MappingWindow(this, type, static_cast<int>(index));
   window->setAttribute(Qt::WA_DeleteOnClose, true);
   window->setWindowModality(Qt::WindowModality::WindowModal);
-  SetQWidgetWindowDecorations(window);
   window->show();
 }
 

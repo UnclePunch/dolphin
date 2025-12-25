@@ -13,6 +13,7 @@
 
 #include "Common/CommonTypes.h"
 #include "Common/MathUtil.h"
+#include "Common/StringUtil.h"
 #include "DiscIO/Blob.h"
 #include "DiscIO/Filesystem.h"
 #include "DiscIO/Volume.h"
@@ -39,8 +40,7 @@ std::string NameForPartitionType(u32 partition_type, bool include_prefix)
                                       static_cast<char>((partition_type >> 16) & 0xFF),
                                       static_cast<char>((partition_type >> 8) & 0xFF),
                                       static_cast<char>(partition_type & 0xFF)};
-    if (std::all_of(type_as_game_id.cbegin(), type_as_game_id.cend(),
-                    [](char c) { return std::isalnum(c, std::locale::classic()); }))
+    if (std::ranges::all_of(type_as_game_id, Common::IsAlnum))
     {
       return include_prefix ? "P-" + type_as_game_id : type_as_game_id;
     }
@@ -207,23 +207,23 @@ bool IsGCZBlockSizeLegacyCompatible(int block_size, u64 file_size)
   return file_size % block_size == 0 && file_size % (block_size * 32) != 0;
 }
 
-bool IsDiscImageBlockSizeValid(int block_size, DiscIO::BlobType format)
+bool IsDiscImageBlockSizeValid(int block_size, BlobType format)
 {
   switch (format)
   {
-  case DiscIO::BlobType::GCZ:
+  case BlobType::GCZ:
     // Block size "must" be a power of 2
     if (!MathUtil::IsPow2(block_size))
       return false;
 
     break;
-  case DiscIO::BlobType::WIA:
+  case BlobType::WIA:
     // Block size must not be less than the minimum, and must be a multiple of it
     if (block_size < WIA_MIN_BLOCK_SIZE || block_size % WIA_MIN_BLOCK_SIZE != 0)
       return false;
 
     break;
-  case DiscIO::BlobType::RVZ:
+  case BlobType::RVZ:
     // Block size must not be smaller than the minimum
     // Block sizes smaller than the large block size threshold must be a power of 2
     // Block sizes larger than that threshold must be a multiple of the threshold

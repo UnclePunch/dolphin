@@ -126,6 +126,12 @@ public:
     MaintainState,
   };
 
+  enum class IgnoreDiscardedRegisters
+  {
+    No,
+    Yes,
+  };
+
   explicit RegCache(Jit64& jit);
   virtual ~RegCache() = default;
 
@@ -151,12 +157,14 @@ public:
   bool IsImm(Args... pregs) const
   {
     static_assert(sizeof...(pregs) > 0);
-    return (R(pregs).IsImm() && ...);
+    return (IsImm(preg_t(pregs)) && ...);
   }
-  u32 Imm32(preg_t preg) const { return R(preg).Imm32(); }
-  s32 SImm32(preg_t preg) const { return R(preg).SImm32(); }
 
-  bool IsBound(preg_t preg) const { return m_regs[preg].IsBound(); }
+  virtual bool IsImm(preg_t preg) const = 0;
+  virtual u32 Imm32(preg_t preg) const = 0;
+  virtual s32 SImm32(preg_t preg) const = 0;
+
+  bool IsBound(preg_t preg) const { return m_regs[preg].IsInHostRegister(); }
 
   RCOpArg Use(preg_t preg, RCMode mode);
   RCOpArg UseNoImm(preg_t preg, RCMode mode);
@@ -168,7 +176,8 @@ public:
 
   RCForkGuard Fork();
   void Discard(BitSet32 pregs);
-  void Flush(BitSet32 pregs = BitSet32::AllTrue(32));
+  void Flush(BitSet32 pregs = BitSet32::AllTrue(32),
+             IgnoreDiscardedRegisters ignore_discarded_registers = IgnoreDiscardedRegisters::No);
   void Reset(BitSet32 pregs);
   void Revert();
   void Commit();
@@ -184,8 +193,10 @@ protected:
   friend class RCForkGuard;
 
   virtual Gen::OpArg GetDefaultLocation(preg_t preg) const = 0;
-  virtual void StoreRegister(preg_t preg, const Gen::OpArg& new_loc) = 0;
+  virtual void StoreRegister(preg_t preg, const Gen::OpArg& new_loc,
+                             IgnoreDiscardedRegisters ignore_discarded_registers) = 0;
   virtual void LoadRegister(preg_t preg, Gen::X64Reg new_loc) = 0;
+  virtual void DiscardImm(preg_t preg) = 0;
 
   virtual std::span<const Gen::X64Reg> GetAllocationOrder() const = 0;
 
@@ -193,16 +204,18 @@ protected:
   virtual BitSet32 CountRegsIn(preg_t preg, u32 lookahead) const = 0;
 
   void FlushX(Gen::X64Reg reg);
-  void DiscardRegContentsIfCached(preg_t preg);
+  void DiscardRegister(preg_t preg);
   void BindToRegister(preg_t preg, bool doLoad = true, bool makeDirty = true);
-  void StoreFromRegister(preg_t preg, FlushMode mode = FlushMode::Full);
+  void StoreFromRegister(
+      preg_t preg, FlushMode mode = FlushMode::Full,
+      IgnoreDiscardedRegisters ignore_discarded_registers = IgnoreDiscardedRegisters::No);
 
   Gen::X64Reg GetFreeXReg();
 
   int NumFreeRegisters() const;
   float ScoreRegister(Gen::X64Reg xreg) const;
 
-  const Gen::OpArg& R(preg_t preg) const;
+  virtual Gen::OpArg R(preg_t preg) const = 0;
   Gen::X64Reg RX(preg_t preg) const;
 
   void Lock(preg_t preg);

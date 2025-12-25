@@ -45,7 +45,7 @@ enum class StringSetting(
         Settings.FILE_DOLPHIN,
         Settings.SECTION_INI_CORE,
         "GFXBackend",
-        NativeLibrary.GetDefaultGraphicsBackendName()
+        NativeLibrary.GetDefaultGraphicsBackendConfigName()
     ),
     MAIN_DUMP_PATH(Settings.FILE_DOLPHIN, Settings.SECTION_INI_GENERAL, "DumpPath", ""),
     MAIN_LOAD_PATH(Settings.FILE_DOLPHIN, Settings.SECTION_INI_GENERAL, "LoadPath", ""),
@@ -79,6 +79,18 @@ enum class StringSetting(
         Settings.FILE_GFX,
         Settings.SECTION_GFX_SETTINGS,
         "DriverLibName",
+        ""
+    ),
+    ACHIEVEMENTS_USERNAME(
+        Settings.FILE_ACHIEVEMENTS,
+        Settings.SECTION_ACHIEVEMENTS,
+        "Username",
+        ""
+    ),
+    ACHIEVEMENTS_API_TOKEN(
+        Settings.FILE_ACHIEVEMENTS,
+        Settings.SECTION_ACHIEVEMENTS,
+        "ApiToken",
         ""
     );
 

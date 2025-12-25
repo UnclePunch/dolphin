@@ -16,24 +16,15 @@
 
 namespace IOS::HLE
 {
-constexpr u32 USBV5_VERSION = 0x50001;
-
-USB_VEN::~USB_VEN()
-{
-  m_scan_thread.Stop();
-}
+USB_VEN::~USB_VEN() = default;
 
 std::optional<IPCReply> USB_VEN::IOCtl(const IOCtlRequest& request)
 {
-  auto& system = GetSystem();
-  auto& memory = system.GetMemory();
-
   request.Log(GetDeviceName(), Common::Log::LogType::IOS_USB);
   switch (request.request)
   {
   case USB::IOCTL_USBV5_GETVERSION:
-    memory.Write_U32(USBV5_VERSION, request.buffer_out);
-    return IPCReply(IPC_SUCCESS);
+    return GetUSBVersion(request);
   case USB::IOCTL_USBV5_GETDEVICECHANGE:
     return GetDeviceChange(request);
   case USB::IOCTL_USBV5_SHUTDOWN:
@@ -88,7 +79,7 @@ std::optional<IPCReply> USB_VEN::IOCtlV(const IOCtlVRequest& request)
     else
       host_device->AttachAndChangeInterface(device->interface_number);
     return HandleTransfer(host_device, request.request,
-                          [&, this]() { return SubmitTransfer(*host_device, request); });
+                          [&, this] { return SubmitTransfer(*host_device, request); });
   }
   default:
     return IPCReply(IPC_EINVAL);
@@ -152,11 +143,10 @@ IPCReply USB_VEN::GetDeviceInfo(USBV5Device& device, const IOCtlRequest& request
   memory.CopyToEmu(request.buffer_out + 40, &config_descriptor, sizeof(config_descriptor));
 
   std::vector<USB::InterfaceDescriptor> interfaces = host_device->GetInterfaces(0);
-  auto it = std::find_if(interfaces.begin(), interfaces.end(),
-                         [&](const USB::InterfaceDescriptor& interface) {
-                           return interface.bInterfaceNumber == device.interface_number &&
-                                  interface.bAlternateSetting == alt_setting;
-                         });
+  auto it = std::ranges::find_if(interfaces, [&](const USB::InterfaceDescriptor& interface) {
+    return interface.bInterfaceNumber == device.interface_number &&
+           interface.bAlternateSetting == alt_setting;
+  });
   if (it == interfaces.end())
     return IPCReply(IPC_EINVAL);
   it->Swap();

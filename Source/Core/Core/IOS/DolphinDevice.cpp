@@ -68,9 +68,7 @@ IPCReply GetCPUSpeed(Core::System& system, const IOCtlVRequest& request)
     return IPCReply(IPC_EINVAL);
   }
 
-  const bool overclock_enabled = Config::Get(Config::MAIN_OVERCLOCK_ENABLE);
-  const float oc = overclock_enabled ? Config::Get(Config::MAIN_OVERCLOCK) : 1.0f;
-
+  const bool oc = system.GetCoreTiming().GetOverclock();
   const u32 core_clock = u32(float(system.GetSystemTimers().GetTicksPerSecond()) * oc);
 
   auto& memory = system.GetMemory();
@@ -133,13 +131,13 @@ IPCReply GetRealProductCode(Core::System& system, const IOCtlVRequest& request)
   if (!file)
     return IPCReply(IPC_ENOENT);
 
-  Common::SettingsHandler::Buffer data;
+  Common::SettingsBuffer data;
 
   if (!file.ReadBytes(data.data(), data.size()))
     return IPCReply(IPC_ENOENT);
 
-  Common::SettingsHandler gen(data);
-  const std::string code = gen.GetValue("CODE");
+  const Common::SettingsReader settings_reader(data);
+  const std::string code = settings_reader.GetValue("CODE");
 
   const size_t length = std::min<size_t>(request.io_vectors[0].size, code.length());
   if (length == 0)

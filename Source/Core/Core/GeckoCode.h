@@ -39,10 +39,8 @@ public:
 };
 
 bool operator==(const GeckoCode& lhs, const GeckoCode& rhs);
-bool operator!=(const GeckoCode& lhs, const GeckoCode& rhs);
 
 bool operator==(const GeckoCode::Code& lhs, const GeckoCode::Code& rhs);
-bool operator!=(const GeckoCode::Code& lhs, const GeckoCode::Code& rhs);
 
 // Installation address for codehandler.bin in the Game's RAM
 constexpr u32 INSTALLER_BASE_ADDRESS = 0x80001800;
@@ -62,7 +60,8 @@ constexpr u32 HLE_TRAMPOLINE_ADDRESS = INSTALLER_END_ADDRESS - 4;
 // preserve the emulation performance.
 constexpr u32 MAGIC_GAMEID = 0xD01F1BAD;
 
-void SetActiveCodes(std::span<const GeckoCode> gcodes);
+size_t CountEnabledCodes();
+void SetActiveCodes(std::span<const GeckoCode> gcodes, const std::string& game_id, u16 revision);
 void SetSyncedCodesAsActive();
 void UpdateSyncedCodes(std::span<const GeckoCode> gcodes);
 std::vector<GeckoCode> SetAndReturnActiveCodes(std::span<const GeckoCode> gcodes);

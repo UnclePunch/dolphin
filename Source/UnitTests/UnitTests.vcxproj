@@ -53,11 +53,13 @@
     <ClCompile Include="Common\FlagTest.cpp" />
     <ClCompile Include="Common\FloatUtilsTest.cpp" />
     <ClCompile Include="Common\MathUtilTest.cpp" />
+    <ClCompile Include="Common\MutexTest.cpp" />
     <ClCompile Include="Common\NandPathsTest.cpp" />
     <ClCompile Include="Common\SettingsHandlerTest.cpp" />
     <ClCompile Include="Common\SPSCQueueTest.cpp" />
     <ClCompile Include="Common\StringUtilTest.cpp" />
     <ClCompile Include="Common\SwapTest.cpp" />
+    <ClCompile Include="Common\WorkQueueThreadTest.cpp" />
     <ClCompile Include="Core\CoreTimingTest.cpp" />
     <ClCompile Include="Core\DSP\DSPAcceleratorTest.cpp" />
     <ClCompile Include="Core\DSP\DSPAssemblyTest.cpp" />
@@ -102,7 +104,9 @@
   </ItemGroup>
   <Import Project="$(ExternalsDir)Bochs_disasm\exports.props" />
   <Import Project="$(ExternalsDir)fmt\exports.props" />
+  <Import Project="$(ExternalsDir)glslang\exports.props" />
   <Import Project="$(ExternalsDir)picojson\exports.props" />
+  <Import Project="$(ExternalsDir)rcheevos\exports.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

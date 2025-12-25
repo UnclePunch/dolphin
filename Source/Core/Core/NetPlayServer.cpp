@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -31,6 +32,7 @@
 #include "Common/UPnP.h"
 #include "Common/Version.h"
 
+#include "Core/AchievementManager.h"
 #include "Core/ActionReplay.h"
 #include "Core/Boot/Boot.h"
 #include "Core/Config/GraphicsSettings.h"
@@ -83,6 +85,10 @@
 #include <ifaddrs.h>
 #endif
 #include <arpa/inet.h>
+#else
+#include <iphlpapi.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #endif
 
 namespace NetPlay
@@ -284,8 +290,8 @@ void NetPlayServer::ThreadFunc()
         auto& e = m_async_queue.Front();
         if (e.target_mode == TargetMode::Only)
         {
-          if (m_players.contains(e.target_pid))
-            Send(m_players.at(e.target_pid).socket, e.packet, e.channel_id);
+          if (const auto it = m_players.find(e.target_pid); it != m_players.end())
+            Send(it->second.socket, e.packet, e.channel_id);
         }
         else
         {
@@ -409,10 +415,10 @@ void NetPlayServer::ThreadFunc()
   INFO_LOG_FMT(NETPLAY, "NetPlayServer shutting down.");
 
   // close listening socket and client sockets
-  for (auto& player_entry : m_players)
+  for (const auto& player_entry : std::views::values(m_players))
   {
-    ClearPeerPlayerId(player_entry.second.socket);
-    enet_peer_disconnect(player_entry.second.socket, 0);
+    ClearPeerPlayerId(player_entry.socket);
+    enet_peer_disconnect(player_entry.socket, 0);
   }
   m_players.clear();
 }
@@ -420,7 +426,7 @@ void NetPlayServer::ThreadFunc()
 static void SendSyncIdentifier(sf::Packet& spac, const SyncIdentifier& sync_identifier)
 {
   // We cast here due to a potential long vs long long mismatch
-  spac << static_cast<sf::Uint64>(sync_identifier.dol_elf_size);
+  spac << static_cast<u64>(sync_identifier.dol_elf_size);
 
   spac << sync_identifier.game_id;
   spac << sync_identifier.revision;
@@ -455,7 +461,7 @@ ConnectionError NetPlayServer::OnConnect(ENetPeer* incoming_connection, sf::Pack
   if (StringUTF8CodePointCount(new_player.name) > MAX_NAME_LENGTH)
     return ConnectionError::NameTooLong;
 
-  // Update time in milliseconds of no acknoledgment of
+  // Update time in milliseconds of no acknowledgment of
   // sent packets before a connection is deemed disconnected
   enet_peer_timeout(incoming_connection, 0, PEER_TIMEOUT.count(), PEER_TIMEOUT.count());
 
@@ -486,13 +492,13 @@ ConnectionError NetPlayServer::OnConnect(ENetPeer* incoming_connection, sf::Pack
 
   SendResponseToPlayer(new_player, MessageID::HostInputAuthority, m_host_input_authority);
 
-  for (const auto& existing_player : m_players)
+  for (const auto& existing_player : std::views::values(m_players))
   {
-    SendResponseToPlayer(new_player, MessageID::PlayerJoin, existing_player.second.pid,
-                         existing_player.second.name, existing_player.second.revision);
+    SendResponseToPlayer(new_player, MessageID::PlayerJoin, existing_player.pid,
+                         existing_player.name, existing_player.revision);
 
-    SendResponseToPlayer(new_player, MessageID::GameStatus, existing_player.second.pid,
-                         static_cast<u8>(existing_player.second.game_status));
+    SendResponseToPlayer(new_player, MessageID::GameStatus, existing_player.pid,
+                         static_cast<u8>(existing_player.game_status));
   }
 
   if (Config::Get(Config::NETPLAY_ENABLE_QOS))
@@ -788,9 +794,10 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
     u32 cid;
     packet >> cid;
 
-    if (m_chunked_data_complete_count.contains(cid))
+    if (const auto it = m_chunked_data_complete_count.find(cid);
+        it != m_chunked_data_complete_count.end())
     {
-      m_chunked_data_complete_count[cid]++;
+      it->second++;
       m_chunked_data_complete_event.Set();
     }
   }
@@ -833,8 +840,11 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
     if (m_host_input_authority)
     {
       // Prevent crash before game stop if the golfer disconnects
-      if (m_current_golfer != 0 && m_players.contains(m_current_golfer))
-        Send(m_players.at(m_current_golfer).socket, spac);
+      if (m_current_golfer != 0)
+      {
+        if (const auto it = m_players.find(m_current_golfer); it != m_players.end())
+          Send(it->second.socket, spac);
+      }
     }
     else
     {
@@ -1059,14 +1069,14 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
     {
       // we have all records for this frame
 
-      if (!std::all_of(timebases.begin(), timebases.end(), [&](std::pair<PlayerId, u64> pair) {
+      if (!std::ranges::all_of(timebases, [&](std::pair<PlayerId, u64> pair) {
             return pair.second == timebases[0].second;
           }))
       {
         int pid_to_blame = 0;
         for (auto pair : timebases)
         {
-          if (std::all_of(timebases.begin(), timebases.end(), [&](std::pair<PlayerId, u64> other) {
+          if (std::ranges::all_of(timebases, [&](std::pair<PlayerId, u64> other) {
                 return other.first == pair.first || other.second != pair.second;
               }))
           {
@@ -1358,6 +1368,7 @@ bool NetPlayServer::SetupNetSettings()
   settings.cpu_thread = Config::Get(Config::MAIN_CPU_THREAD);
   settings.cpu_core = Config::Get(Config::MAIN_CPU_CORE);
   settings.enable_cheats = Config::AreCheatsEnabled();
+  settings.enable_hardcore = AchievementManager::GetInstance().IsHardcoreModeActive();
   settings.selected_language = Config::Get(Config::MAIN_GC_LANGUAGE);
   settings.override_region_settings = Config::Get(Config::MAIN_OVERRIDE_REGION_SETTINGS);
   settings.dsp_hle = Config::Get(Config::MAIN_DSP_HLE);
@@ -1369,6 +1380,8 @@ bool NetPlayServer::SetupNetSettings()
   settings.allow_sd_writes = Config::Get(Config::MAIN_ALLOW_SD_WRITES);
   settings.oc_enable = Config::Get(Config::MAIN_OVERCLOCK_ENABLE);
   settings.oc_factor = Config::Get(Config::MAIN_OVERCLOCK);
+  settings.vi_oc_enable = Config::Get(Config::MAIN_VI_OVERCLOCK_ENABLE);
+  settings.vi_oc_factor = Config::Get(Config::MAIN_VI_OVERCLOCK);
 
   for (ExpansionInterface::Slot slot : ExpansionInterface::SLOTS)
   {
@@ -1465,14 +1478,12 @@ bool NetPlayServer::SetupNetSettings()
 
 bool NetPlayServer::DoAllPlayersHaveIPLDump() const
 {
-  return std::all_of(m_players.begin(), m_players.end(),
-                     [](const auto& p) { return p.second.has_ipl_dump; });
+  return std::ranges::all_of(m_players, [](const auto& p) { return p.second.has_ipl_dump; });
 }
 
 bool NetPlayServer::DoAllPlayersHaveHardwareFMA() const
 {
-  return std::all_of(m_players.begin(), m_players.end(),
-                     [](const auto& p) { return p.second.has_hardware_fma; });
+  return std::ranges::all_of(m_players, [](const auto& p) { return p.second.has_hardware_fma; });
 }
 
 struct SaveSyncInfo
@@ -1510,7 +1521,7 @@ bool NetPlayServer::RequestStartGame()
     {
       // Set titles for host-side loading in WiiRoot
       std::vector<u64> titles;
-      for (const auto& [title_id, storage] : save_sync_info->wii_saves)
+      for (const auto& title_id : std::views::keys(save_sync_info->wii_saves))
         titles.push_back(title_id);
       m_dialog->SetHostWiiSyncData(
           std::move(titles),
@@ -1570,7 +1581,7 @@ bool NetPlayServer::StartGame()
   m_current_golfer = 1;
   m_pending_golfer = 0;
 
-  const sf::Uint64 initial_rtc = GetInitialNetPlayRTC();
+  const u64 initial_rtc = GetInitialNetPlayRTC();
 
   const std::string region = Config::GetDirectoryForRegion(
       Config::ToGameCubeRegion(m_dialog->FindGameFile(m_selected_game_identifier)->GetRegion()));
@@ -1586,6 +1597,7 @@ bool NetPlayServer::StartGame()
   spac << m_settings.cpu_thread;
   spac << m_settings.cpu_core;
   spac << m_settings.enable_cheats;
+  spac << m_settings.enable_hardcore;
   spac << m_settings.selected_language;
   spac << m_settings.override_region_settings;
   spac << m_settings.dsp_enable_jit;
@@ -1597,6 +1609,8 @@ bool NetPlayServer::StartGame()
   spac << m_settings.allow_sd_writes;
   spac << m_settings.oc_enable;
   spac << m_settings.oc_factor;
+  spac << m_settings.vi_oc_enable;
+  spac << m_settings.vi_oc_factor;
 
   for (auto slot : ExpansionInterface::SLOTS)
     spac << static_cast<int>(m_settings.exi_device[slot]);
@@ -1846,7 +1860,7 @@ bool NetPlayServer::SyncSaveData(const SaveSyncInfo& sync_info)
         // No file, so we'll say the size is 0
         INFO_LOG_FMT(NETPLAY, "Sending empty marker for raw memcard {} in slot {}.", path,
                      is_slot_a ? 'A' : 'B');
-        pac << sf::Uint64{0};
+        pac << u64{0};
       }
 
       SendChunkedToClients(std::move(pac), 1,
@@ -1920,7 +1934,7 @@ bool NetPlayServer::SyncSaveData(const SaveSyncInfo& sync_info)
 
     for (const auto& [title_id, storage] : sync_info.wii_saves)
     {
-      pac << sf::Uint64{title_id};
+      pac << u64{title_id};
 
       if (storage->SaveExists())
       {
@@ -1937,7 +1951,7 @@ bool NetPlayServer::SyncSaveData(const SaveSyncInfo& sync_info)
         pac << true;  // save exists
 
         // Header
-        pac << sf::Uint64{header->tid};
+        pac << u64{header->tid};
         pac << header->banner_size << header->permissions << header->unk1;
         for (u8 byte : header->md5)
           pac << byte;
@@ -1951,7 +1965,7 @@ bool NetPlayServer::SyncSaveData(const SaveSyncInfo& sync_info)
             << bk_header->total_size;
         for (u8 byte : bk_header->unk3)
           pac << byte;
-        pac << sf::Uint64{bk_header->tid};
+        pac << u64{bk_header->tid};
         for (u8 byte : bk_header->mac_address)
           pac << byte;
 
@@ -2019,7 +2033,7 @@ bool NetPlayServer::SyncSaveData(const SaveSyncInfo& sync_info)
       {
         // No file, so we'll say the size is 0
         INFO_LOG_FMT(NETPLAY, "Sending empty marker for GBA save at {} for slot {}.", path, i);
-        pac << sf::Uint64{0};
+        pac << u64{0};
       }
 
       SendChunkedToClients(std::move(pac), 1,
@@ -2067,13 +2081,18 @@ bool NetPlayServer::SyncCodes()
   }
   // Sync Gecko Codes
   {
+    std::vector<Gecko::GeckoCode> codes = Gecko::LoadCodes(globalIni, localIni);
+
+#ifdef USE_RETRO_ACHIEVEMENTS
+    AchievementManager::GetInstance().FilterApprovedGeckoCodes(codes, game_id, revision);
+#endif  // USE_RETRO_ACHIEVEMENTS
+
     // Create a Gecko Code Vector with just the active codes
-    std::vector<Gecko::GeckoCode> s_active_codes =
-        Gecko::SetAndReturnActiveCodes(Gecko::LoadCodes(globalIni, localIni));
+    std::vector<Gecko::GeckoCode> active_codes = Gecko::SetAndReturnActiveCodes(codes);
 
     // Determine Codelist Size
     u16 codelines = 0;
-    for (const Gecko::GeckoCode& active_code : s_active_codes)
+    for (const Gecko::GeckoCode& active_code : active_codes)
     {
       INFO_LOG_FMT(NETPLAY, "Indexing {}", active_code.name);
       for (const Gecko::GeckoCode::Code& code : active_code.codes)
@@ -2101,7 +2120,7 @@ bool NetPlayServer::SyncCodes()
       pac << MessageID::SyncCodes;
       pac << SyncCodeID::GeckoData;
       // Iterate through the active code vector and send each codeline
-      for (const Gecko::GeckoCode& active_code : s_active_codes)
+      for (const Gecko::GeckoCode& active_code : active_codes)
       {
         INFO_LOG_FMT(NETPLAY, "Sending {}", active_code.name);
         for (const Gecko::GeckoCode::Code& code : active_code.codes)
@@ -2117,13 +2136,16 @@ bool NetPlayServer::SyncCodes()
 
   // Sync AR Codes
   {
+    std::vector<ActionReplay::ARCode> codes = ActionReplay::LoadCodes(globalIni, localIni);
+#ifdef USE_RETRO_ACHIEVEMENTS
+    AchievementManager::GetInstance().FilterApprovedARCodes(codes, game_id, revision);
+#endif  // USE_RETRO_ACHIEVEMENTS
     // Create an AR Code Vector with just the active codes
-    std::vector<ActionReplay::ARCode> s_active_codes =
-        ActionReplay::ApplyAndReturnCodes(ActionReplay::LoadCodes(globalIni, localIni));
+    std::vector<ActionReplay::ARCode> active_codes = ActionReplay::ApplyAndReturnCodes(codes);
 
     // Determine Codelist Size
     u16 codelines = 0;
-    for (const ActionReplay::ARCode& active_code : s_active_codes)
+    for (const ActionReplay::ARCode& active_code : active_codes)
     {
       INFO_LOG_FMT(NETPLAY, "Indexing {}", active_code.name);
       for (const ActionReplay::AREntry& op : active_code.ops)
@@ -2151,7 +2173,7 @@ bool NetPlayServer::SyncCodes()
       pac << MessageID::SyncCodes;
       pac << SyncCodeID::ARData;
       // Iterate through the active code vector and send each codeline
-      for (const ActionReplay::ARCode& active_code : s_active_codes)
+      for (const ActionReplay::ARCode& active_code : active_codes)
       {
         INFO_LOG_FMT(NETPLAY, "Sending {}", active_code.name);
         for (const ActionReplay::AREntry& op : active_code.ops)
@@ -2193,11 +2215,11 @@ u64 NetPlayServer::GetInitialNetPlayRTC() const
 void NetPlayServer::SendToClients(const sf::Packet& packet, const PlayerId skip_pid,
                                   const u8 channel_id)
 {
-  for (auto& p : m_players)
+  for (auto& p : std::views::values(m_players))
   {
-    if (p.second.pid && p.second.pid != skip_pid)
+    if (p.pid && p.pid != skip_pid)
     {
-      Send(p.second.socket, packet, channel_id);
+      Send(p.socket, packet, channel_id);
     }
   }
 }
@@ -2209,11 +2231,11 @@ void NetPlayServer::Send(ENetPeer* socket, const sf::Packet& packet, const u8 ch
 
 void NetPlayServer::KickPlayer(PlayerId player)
 {
-  for (auto& current_player : m_players)
+  for (auto& current_player : std::views::values(m_players))
   {
-    if (current_player.second.pid == player)
+    if (current_player.pid == player)
     {
-      enet_peer_disconnect(current_player.second.socket, 0);
+      enet_peer_disconnect(current_player.socket, 0);
       return;
     }
   }
@@ -2223,8 +2245,8 @@ bool NetPlayServer::PlayerHasControllerMapped(const PlayerId pid) const
 {
   const auto mapping_matches_player_id = [pid](const PlayerId& mapping) { return mapping == pid; };
 
-  return std::any_of(m_pad_map.begin(), m_pad_map.end(), mapping_matches_player_id) ||
-         std::any_of(m_wiimote_map.begin(), m_wiimote_map.end(), mapping_matches_player_id);
+  return std::ranges::any_of(m_pad_map, mapping_matches_player_id) ||
+         std::ranges::any_of(m_wiimote_map, mapping_matches_player_id);
 }
 
 void NetPlayServer::AssignNewUserAPad(const Client& player)
@@ -2314,7 +2336,33 @@ std::vector<std::pair<std::string, std::string>> NetPlayServer::GetInterfaceList
 {
   std::vector<std::pair<std::string, std::string>> result;
 #if defined(_WIN32)
+  ULONG buffer_size = 0;
+  GetAdaptersAddresses(AF_INET, 0, nullptr, nullptr, &buffer_size);
 
+  std::vector<char> buffer(buffer_size);
+  auto* const adapters = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(buffer.data());
+  const ULONG adapters_result = GetAdaptersAddresses(AF_INET, 0, nullptr, adapters, &buffer_size);
+  if (adapters_result == NO_ERROR)
+  {
+    for (auto* adapter = adapters; adapter != nullptr; adapter = adapter->Next)
+    {
+      if (adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK)
+        continue;
+
+      auto* const unicast = adapter->FirstUnicastAddress;
+      if (!unicast)
+        continue;
+
+      char addr_str[INET_ADDRSTRLEN] = {};
+      inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in*>(unicast->Address.lpSockaddr)->sin_addr,
+                addr_str, sizeof(addr_str));
+      result.emplace_back(WStringToUTF8(adapter->FriendlyName), addr_str);
+    }
+  }
+  else
+  {
+    WARN_LOG_FMT(NETPLAY, "GetAdaptersAddresses: {}", adapters_result);
+  }
 #elif defined(ANDROID)
 // Android has no getifaddrs for some stupid reason.  If this
 // functionality ends up actually being used on Android, fix this.
@@ -2384,10 +2432,10 @@ void NetPlayServer::ChunkedDataThreadFunc()
         }
         else
         {
-          for (auto& pl : m_players)
+          for (auto& pl : std::views::values(m_players))
           {
-            if (pl.second.pid != e.target_pid)
-              players.push_back(pl.second.pid);
+            if (pl.pid != e.target_pid)
+              players.push_back(pl.pid);
           }
         }
         player_count = players.size();
@@ -2397,7 +2445,7 @@ void NetPlayServer::ChunkedDataThreadFunc()
 
         sf::Packet pac;
         pac << MessageID::ChunkedDataStart;
-        pac << id << e.title << sf::Uint64{e.packet.getDataSize()};
+        pac << id << e.title << u64{e.packet.getDataSize()};
 
         ChunkedDataSend(std::move(pac), e.target_pid, e.target_mode);
 

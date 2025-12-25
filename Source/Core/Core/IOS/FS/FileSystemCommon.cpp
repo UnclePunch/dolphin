@@ -26,7 +26,7 @@ bool IsValidNonRootPath(std::string_view path)
 bool IsValidFilename(std::string_view filename)
 {
   return filename.length() <= MaxFilenameLength &&
-         !std::any_of(filename.begin(), filename.end(), [](char c) { return c == '/'; });
+         !std::ranges::any_of(filename, [](char c) { return c == '/'; });
 }
 
 SplitPathResult SplitPathAndBasename(std::string_view path)
@@ -95,8 +95,7 @@ Result<FileStatus> FileHandle::GetStatus() const
 Result<FileHandle> FileSystem::CreateAndOpenFile(Uid uid, Gid gid, const std::string& path,
                                                  Modes modes)
 {
-  Result<FileHandle> file = OpenFile(uid, gid, path, Mode::ReadWrite);
-  if (file.Succeeded())
+  if (Result<FileHandle> file = OpenFile(uid, gid, path, Mode::ReadWrite))
     return file;
 
   const ResultCode result = CreateFile(uid, gid, path, 0, modes);

@@ -32,7 +32,7 @@ struct Metal::StateTracker::Backref
 {
   std::mutex mtx;
   StateTracker* state_tracker;
-  explicit Backref(StateTracker* state_tracker) : state_tracker(state_tracker) {}
+  explicit Backref(StateTracker* tracker) : state_tracker(tracker) {}
 };
 
 struct Metal::StateTracker::PerfQueryTracker
@@ -61,8 +61,8 @@ static NSString* GetName(Metal::StateTracker::UploadBuffer buffer)
 
 bool Metal::StateTracker::UsageTracker::PrepareForAllocation(u64 last_draw, size_t amt)
 {
-  auto removeme = std::find_if(m_usage.begin(), m_usage.end(),
-                               [last_draw](UsageEntry usage) { return usage.drawno > last_draw; });
+  auto removeme = std::ranges::find_if(
+      m_usage, [last_draw](UsageEntry usage) { return usage.drawno > last_draw; });
   if (removeme != m_usage.begin())
     m_usage.erase(m_usage.begin(), removeme);
 
@@ -144,7 +144,7 @@ Metal::StateTracker::Map Metal::StateTracker::AllocateForTextureUpload(size_t am
   CPUBuffer& buffer = m_texture_upload_buffer;
   u64 last_draw = m_last_finished_draw.load(std::memory_order_acquire);
   bool needs_new = buffer.usage.PrepareForAllocation(last_draw, amt);
-  if (__builtin_expect(needs_new, false))
+  if (needs_new) [[unlikely]]
   {
     // Orphan buffer
     size_t newsize = std::max<size_t>(buffer.usage.Size() * 2, 4096);
@@ -187,7 +187,7 @@ std::pair<void*, size_t> Metal::StateTracker::Preallocate(UploadBuffer buffer_id
     }
     buffer.last_upload = 0;
   }
-  if (__builtin_expect(needs_new, false))
+  if (needs_new) [[unlikely]]
   {
     // Orphan buffer
     size_t newsize = std::max<size_t>(buffer.usage.Size() * 2, 4096);
@@ -737,9 +737,8 @@ void Metal::StateTracker::PrepareRender()
       m_current.depth_stencil = pipe->DepthStencil();
       [enc setDepthStencilState:g_object_cache->GetDepthStencil(m_current.depth_stencil)];
     }
-    MTLDepthClipMode clip = is_gx && g_ActiveConfig.backend_info.bSupportsDepthClamp ?
-                                MTLDepthClipModeClamp :
-                                MTLDepthClipModeClip;
+    MTLDepthClipMode clip =
+        is_gx && g_backend_info.bSupportsDepthClamp ? MTLDepthClipModeClamp : MTLDepthClipModeClip;
     if (clip != m_current.depth_clip_mode)
     {
       m_current.depth_clip_mode = clip;

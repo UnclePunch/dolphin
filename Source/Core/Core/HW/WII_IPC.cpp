@@ -41,6 +41,8 @@ enum
   ARM_IRQFLAG = 0x38,
   ARM_IRQMASK = 0x3c,
 
+  AHBPROT = 0x64,
+
   GPIOB_OUT = 0xc0,
   GPIOB_DIR = 0xc4,
   GPIOB_IN = 0xc8,
@@ -169,6 +171,9 @@ void WiiIPC::RegisterMMIO(MMIO::Mapping* mmio, u32 base)
                                                         0);
                  }));
 
+  // Dolphin currently does not emulate any hardware access restrictions.
+  mmio->Register(base | AHBPROT, MMIO::Constant<u32>(0xFFFFFFFF), MMIO::InvalidWrite<u32>());
+
   mmio->Register(base | GPIOB_OUT, MMIO::DirectRead<u32>(&m_gpio_out.m_hex),
                  MMIO::ComplexWrite<u32>([](Core::System& system, u32, u32 val) {
                    auto& wii_ipc = system.GetWiiIPC();
@@ -290,8 +295,7 @@ void WiiIPC::GenerateAck(u32 address)
                 m_ctrl.Y1, m_ctrl.Y2, m_ctrl.X1);
   // Based on a hardware test, the IPC interrupt takes approximately 100 TB ticks to fire
   // after Y2 is seen in the control register.
-  m_system.GetCoreTiming().ScheduleEvent(100 * SystemTimers::TIMER_RATIO,
-                                         m_event_type_update_interrupts);
+  m_system.GetCoreTiming().ScheduleEvent(100_tbticks, m_event_type_update_interrupts);
 }
 
 void WiiIPC::GenerateReply(u32 address)
@@ -302,8 +306,7 @@ void WiiIPC::GenerateReply(u32 address)
                 m_ctrl.Y1, m_ctrl.Y2, m_ctrl.X1);
   // Based on a hardware test, the IPC interrupt takes approximately 100 TB ticks to fire
   // after Y1 is seen in the control register.
-  m_system.GetCoreTiming().ScheduleEvent(100 * SystemTimers::TIMER_RATIO,
-                                         m_event_type_update_interrupts);
+  m_system.GetCoreTiming().ScheduleEvent(100_tbticks, m_event_type_update_interrupts);
 }
 
 bool WiiIPC::IsReady() const

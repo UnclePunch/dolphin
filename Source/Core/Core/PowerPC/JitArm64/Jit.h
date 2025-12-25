@@ -6,19 +6,20 @@
 #include <cstddef>
 #include <map>
 #include <optional>
-#include <tuple>
 
 #include <rangeset/rangesizeset.h>
 
 #include "Common/Arm64Emitter.h"
 
-#include "Core/PowerPC/CPUCoreBase.h"
 #include "Core/PowerPC/JitArm64/JitArm64Cache.h"
 #include "Core/PowerPC/JitArm64/JitArm64_RegCache.h"
 #include "Core/PowerPC/JitArmCommon/BackPatch.h"
+#include "Core/PowerPC/JitCommon/ConstantPropagation.h"
 #include "Core/PowerPC/JitCommon/JitAsmCommon.h"
 #include "Core/PowerPC/JitCommon/JitBase.h"
 #include "Core/PowerPC/PPCAnalyst.h"
+
+class HostDisassembler;
 
 class JitArm64 : public JitBase, public Arm64Gen::ARM64CodeBlock, public CommonAsmRoutinesBase
 {
@@ -32,6 +33,8 @@ public:
 
   void Init() override;
   void Shutdown() override;
+
+  JitCommon::ConstantPropagation& GetConstantPropagation() { return m_constant_propagation; }
 
   JitBaseBlockCache* GetBlockCache() override { return &blocks; }
   bool IsInCodeSpace(const u8* ptr) const { return IsInSpace(ptr); }
@@ -47,6 +50,12 @@ public:
 
   void Jit(u32 em_address) override;
   void Jit(u32 em_address, bool clear_cache_and_retry_on_failure);
+
+  void EraseSingleBlock(const JitBlock& block) override;
+  std::vector<MemoryStats> GetMemoryStats() const override;
+
+  std::size_t DisassembleNearCode(const JitBlock& block, std::ostream& stream) const override;
+  std::size_t DisassembleFarCode(const JitBlock& block, std::ostream& stream) const override;
 
   const char* GetName() const override { return "JITARM64"; }
 
@@ -103,7 +112,6 @@ public:
   void rlwimix(UGeckoInstruction inst);
   void subfex(UGeckoInstruction inst);
   void subfzex(UGeckoInstruction inst);
-  void subfcx(UGeckoInstruction inst);
   void subfic(UGeckoInstruction inst);
   void addex(UGeckoInstruction inst);
   void divwux(UGeckoInstruction inst);
@@ -265,11 +273,17 @@ protected:
   // !emitting_routine && mode != AlwaysSlowAccess && !jo.fastmem:                X30
   // !emitting_routine && mode == Auto && jo.fastmem:                             X30
   //
-  // Furthermore, any callee-saved register which isn't marked in gprs_to_push/fprs_to_push
-  // may be clobbered if mode != AlwaysFastAccess.
+  // Furthermore:
+  // - Any callee-saved register which isn't marked in gprs_to_push/fprs_to_push may be
+  //   clobbered if mode != AlwaysFastAccess.
+  // - If !emitting_routine && mode != AlwaysFastAccess && jo.memcheck, X30 must not
+  //   contain a guest register.
   void EmitBackpatchRoutine(u32 flags, MemAccessMode mode, Arm64Gen::ARM64Reg RS,
                             Arm64Gen::ARM64Reg addr, BitSet32 gprs_to_push = BitSet32(0),
                             BitSet32 fprs_to_push = BitSet32(0), bool emitting_routine = false);
+
+  // temp_gpr must be a valid register, but temp_fpr can be INVALID_REG.
+  void FlushPPCStateBeforeSlowAccess(Arm64Gen::ARM64Reg temp_gpr, Arm64Gen::ARM64Reg temp_fpr);
 
   // Loadstore routines
   void SafeLoadToReg(u32 dest, s32 addr, s32 offsetReg, u32 flags, s32 offset, bool update);
@@ -294,10 +308,13 @@ protected:
   void Cleanup();
   void ResetStack();
 
+  void FreeRanges();
   void GenerateAsmAndResetFreeMemoryRanges();
   void ResetFreeMemoryRanges(size_t routines_near_size, size_t routines_far_size);
 
   void IntializeSpeculativeConstants();
+
+  void LogGeneratedCode() const;
 
   // AsmRoutines
   void GenerateAsm();
@@ -344,20 +361,29 @@ protected:
              Arm64Gen::ARM64Reg exit_address_after_return_reg = Arm64Gen::ARM64Reg::INVALID_REG);
   void WriteBLRExit(Arm64Gen::ARM64Reg dest);
 
-  Arm64Gen::FixupBranch JumpIfCRFieldBit(int field, int bit, bool jump_if_set);
+  void GetCRFieldBit(int field, int bit, Arm64Gen::ARM64Reg out);
+  // This assumes that all bits except for bit 0 (LSB) are set to 0. But if bits_1_to_31_are_set
+  // equals true, it instead assumes that all of bits 1 to 31 are set.
+  void SetCRFieldBit(int field, int bit, Arm64Gen::ARM64Reg in, bool negate = false,
+                     bool bits_1_to_31_are_set = false);
+  void ClearCRFieldBit(int field, int bit);
+  void SetCRFieldBit(int field, int bit);
   void FixGTBeforeSettingCRFieldBit(Arm64Gen::ARM64Reg reg);
+  Arm64Gen::FixupBranch JumpIfCRFieldBit(int field, int bit, bool jump_if_set);
+
   void UpdateFPExceptionSummary(Arm64Gen::ARM64Reg fpscr);
   void UpdateRoundingMode();
 
   void ComputeRC0(Arm64Gen::ARM64Reg reg);
   void ComputeRC0(u32 imm);
+  void GenerateConstantOverflow(bool overflow);
   void ComputeCarry(Arm64Gen::ARM64Reg reg);  // reg must contain 0 or 1
   void ComputeCarry(bool carry);
   void ComputeCarry();
   void LoadCarry();
   void FlushCarry();
 
-  void reg_imm(u32 d, u32 a, u32 value, u32 (*do_op)(u32, u32),
+  void reg_imm(u32 d, u32 a, u32 value,
                void (ARM64XEmitter::*op)(Arm64Gen::ARM64Reg, Arm64Gen::ARM64Reg, u64,
                                          Arm64Gen::ARM64Reg),
                bool Rc = false);
@@ -370,6 +396,8 @@ protected:
   std::map<const u8*, FastmemArea> m_fault_to_handler{};
   Arm64GPRCache gpr;
   Arm64FPRCache fpr;
+
+  JitCommon::ConstantPropagation m_constant_propagation;
 
   JitArm64BlockCache blocks{*this};
 
@@ -409,4 +437,6 @@ protected:
   HyoutaUtilities::RangeSizeSet<u8*> m_free_ranges_near_1;
   HyoutaUtilities::RangeSizeSet<u8*> m_free_ranges_far_0;
   HyoutaUtilities::RangeSizeSet<u8*> m_free_ranges_far_1;
+
+  std::unique_ptr<HostDisassembler> m_disassembler;
 };

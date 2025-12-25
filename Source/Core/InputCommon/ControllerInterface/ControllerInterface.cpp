@@ -248,7 +248,7 @@ bool ControllerInterface::AddDevice(std::shared_ptr<ciface::Core::Device> device
     std::lock_guard lk(m_devices_mutex);
 
     const auto is_id_in_use = [&device, this](int id) {
-      return std::any_of(m_devices.begin(), m_devices.end(), [&device, &id](const auto& d) {
+      return std::ranges::any_of(m_devices, [&device, &id](const auto& d) {
         return d->GetSource() == device->GetSource() && d->GetName() == device->GetName() &&
                d->GetId() == id;
       });
@@ -273,18 +273,14 @@ bool ControllerInterface::AddDevice(std::shared_ptr<ciface::Core::Device> device
     NOTICE_LOG_FMT(CONTROLLERINTERFACE, "Added device: {}", device->GetQualifiedName());
     m_devices.emplace_back(std::move(device));
 
-    // We can't (and don't want) to control the order in which devices are added, but we
-    // need their order to be consistent, and we need the same one to always be the first, where
-    // present (the keyboard and mouse device usually). This is because when defaulting a
-    // controller profile, it will automatically select the first device in the list as its default.
-    std::stable_sort(m_devices.begin(), m_devices.end(),
-                     [](const std::shared_ptr<ciface::Core::Device>& a,
-                        const std::shared_ptr<ciface::Core::Device>& b) {
-                       // It would be nice to sort devices by Source then Name then ID but it's
-                       // better to leave them sorted by the add order, which also avoids breaking
-                       // the order on other platforms that are less tested.
-                       return a->GetSortPriority() > b->GetSortPriority();
-                     });
+    // We can't (and don't want) to control the order in which devices are added, but we need
+    // their order to be consistent, and we need the same one to always be the first, where present
+    // (the keyboard and mouse device usually). This is because when defaulting a controller
+    // profile, it will automatically select the first device in the list as its default. It would
+    // be nice to sort devices by Source then Name then ID, but it's better to leave them sorted by
+    // the add order. This also avoids breaking the order on other platforms that are less tested.
+    std::ranges::stable_sort(m_devices, std::ranges::greater{},
+                             &ciface::Core::Device::GetSortPriority);
   }
 
   if (!m_populating_devices_counter)
@@ -368,10 +364,8 @@ void ControllerInterface::UpdateInput()
   if (devices_to_remove.size() > 0)
   {
     RemoveDevice([&](const ciface::Core::Device* device) {
-      return std::any_of(devices_to_remove.begin(), devices_to_remove.end(),
-                         [device](const std::weak_ptr<ciface::Core::Device>& d) {
-                           return d.lock().get() == device;
-                         });
+      return std::ranges::any_of(devices_to_remove,
+                                 [device](const auto& d) { return d.lock().get() == device; });
     });
   }
 }
@@ -419,27 +413,15 @@ bool ControllerInterface::IsMouseCenteringRequested() const
 // Register a callback to be called when a device is added or removed (as from the input backends'
 // hotplug thread), or when devices are refreshed
 // Returns a handle for later removing the callback.
-ControllerInterface::HotplugCallbackHandle
-ControllerInterface::RegisterDevicesChangedCallback(std::function<void()> callback)
-{
-  std::lock_guard lk(m_callbacks_mutex);
-  m_devices_changed_callbacks.emplace_back(std::move(callback));
-  return std::prev(m_devices_changed_callbacks.end());
-}
 
-// Unregister a device callback.
-void ControllerInterface::UnregisterDevicesChangedCallback(const HotplugCallbackHandle& handle)
+Common::EventHook
+ControllerInterface::RegisterDevicesChangedCallback(Common::HookableEvent<>::CallbackType callback)
 {
-  std::lock_guard lk(m_callbacks_mutex);
-  m_devices_changed_callbacks.erase(handle);
+  return m_devices_changed_event.Register(std::move(callback));
 }
 
 // Invoke all callbacks that were registered
-void ControllerInterface::InvokeDevicesChangedCallbacks() const
+void ControllerInterface::InvokeDevicesChangedCallbacks()
 {
-  m_callbacks_mutex.lock();
-  const auto devices_changed_callbacks = m_devices_changed_callbacks;
-  m_callbacks_mutex.unlock();
-  for (const auto& callback : devices_changed_callbacks)
-    callback();
+  m_devices_changed_event.Trigger();
 }

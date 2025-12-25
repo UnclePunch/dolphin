@@ -48,11 +48,11 @@ static void XFRegWritten(Core::System& system, XFStateManager& xf_state_manager,
     {
       ClipDisable setting{.hex = value};
       if (setting.disable_clipping_detection)
-        DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::SETS_XF_CLIPDISABLE_BIT_0);
+        DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::SetsXFClipDisableBit0);
       if (setting.disable_trivial_rejection)
-        DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::SETS_XF_CLIPDISABLE_BIT_1);
+        DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::SetsXFClipDisableBit1);
       if (setting.disable_cpoly_clipping_acceleration)
-        DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::SETS_XF_CLIPDISABLE_BIT_2);
+        DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::SetsXFClipDisableBit2);
       break;
     }
 
@@ -180,7 +180,7 @@ static void XFRegWritten(Core::System& system, XFStateManager& xf_state_manager,
     case 0x104d:
     case 0x104e:
     case 0x104f:
-      DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::USES_UNKNOWN_XF_COMMAND);
+      DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::UsesUnknownXFCommand);
       DEBUG_LOG_FMT(VIDEO, "Possible Normal Mtx XF reg?: {:x}={:x}", address, value);
       break;
 
@@ -191,7 +191,7 @@ static void XFRegWritten(Core::System& system, XFStateManager& xf_state_manager,
     case 0x1017:
 
     default:
-      DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::USES_UNKNOWN_XF_COMMAND);
+      DolphinAnalytics::Instance().ReportGameQuirk(GameQuirk::UsesUnknownXFCommand);
       WARN_LOG_FMT(VIDEO, "Unknown XF Reg: {:x}={:x}", address, value);
       break;
     }
@@ -267,7 +267,7 @@ void LoadIndexedXF(CPArray array, u32 index, u16 address, u8 size)
   auto& fifo = system.GetFifo();
   if (fifo.UseDeterministicGPUThread())
   {
-    newData = reinterpret_cast<u32*>(fifo.PopFifoAuxBuffer(buf_size));
+    newData = static_cast<u32*>(fifo.PopFifoAuxBuffer(buf_size));
   }
   else
   {
@@ -646,7 +646,7 @@ std::pair<std::string, std::string> GetXFTransferInfo(u16 base_address, u8 trans
 std::pair<std::string, std::string> GetXFIndexedLoadInfo(CPArray array, u32 index, u16 address,
                                                          u8 size)
 {
-  const auto desc = fmt::format("Load {} bytes to XF address {:03x} from CP array {} row {}", size,
+  const auto desc = fmt::format("Load {} words to XF address {:03x} from CP array {} row {}", size,
                                 address, array, index);
   fmt::memory_buffer written;
   for (u32 i = 0; i < size; i++)

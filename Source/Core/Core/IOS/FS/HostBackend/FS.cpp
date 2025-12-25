@@ -43,6 +43,8 @@ HostFileSystem::HostFilename HostFileSystem::BuildFilename(const std::string& wi
     }
   }
 
+  ASSERT(!m_root_path.empty());
+
   if (wii_path.starts_with("/"))
     return HostFilename{m_root_path + Common::EscapePath(wii_path), false};
 
@@ -84,11 +86,6 @@ template <typename T>
 auto GetMetadataFields(T& obj)
 {
   return std::tie(obj.uid, obj.gid, obj.is_file, obj.modes, obj.attribute);
-}
-
-auto GetNamePredicate(const std::string& name)
-{
-  return [&name](const auto& entry) { return entry.name == name; };
 }
 
 // Convert the host directory entries into ones that can be exposed to the emulated system.
@@ -254,8 +251,7 @@ HostFileSystem::FstEntry* HostFileSystem::GetFstEntryForPath(const std::string& 
   for (const std::string& component : SplitString(std::string(path.substr(1)), '/'))
   {
     complete_path += '/' + component;
-    const auto next =
-        std::find_if(entry->children.begin(), entry->children.end(), GetNamePredicate(component));
+    const auto next = std::ranges::find(entry->children, component, &FstEntry::name);
     if (next != entry->children.end())
     {
       entry = &*next;
@@ -378,11 +374,9 @@ void HostFileSystem::DoState(PointerWrap& p)
     handle.host_file.reset();
 
   // The format for the next part of the save state is follows:
-  // 1. bool Movie::WasMovieActiveWhenStateSaved() &&
-  // WiiRoot::WasWiiRootTemporaryDirectoryWhenStateSaved()
+  // 1. bool is_full_nand_in_state (movie active && temporary wii root)
   // 2. Contents of the "/tmp" directory recursively.
-  // 3. u32 size_of_nand_folder_saved_below (or 0, if the root
-  // of the NAND folder is not savestated below).
+  // 3. u32 size_of_nand (or 0, if not is_full_nand_in_state).
   // 4. Contents of the "/" directory recursively (or nothing, if the
   // root of the NAND folder is not save stated).
 
@@ -390,44 +384,42 @@ void HostFileSystem::DoState(PointerWrap& p)
   // and when the directory root is temporary (i.e. WiiSession).
   // If a save state is made during a movie recording and is loaded when no movie is active,
   // then a call to p.DoExternal() will be used to skip over reading the contents of the "/"
-  // directory (it skips over the number of bytes specified by size_of_nand_folder_saved)
+  // directory (it skips over the number of bytes specified by size_of_nand)
 
   auto& movie = Core::System::GetInstance().GetMovie();
-  bool original_save_state_made_during_movie_recording =
-      movie.IsMovieActive() && Core::WiiRootIsTemporary();
-  p.Do(original_save_state_made_during_movie_recording);
 
-  u32 temp_val = 0;
+  const bool is_full_nand_wanted = movie.IsMovieActive() && Core::WiiRootIsTemporary();
+
+  bool is_full_nand_in_state = is_full_nand_wanted;
+  p.Do(is_full_nand_in_state);
 
   if (!p.IsReadMode())
   {
     DoStateWriteOrMeasure(p, "/tmp");
-    u8* previous_position = p.ReserveU32();
-    if (original_save_state_made_during_movie_recording)
+    u8* const nand_size_ptr = p.ReserveU32();
+    if (is_full_nand_in_state)
     {
       DoStateWriteOrMeasure(p, "/");
       if (p.IsWriteMode())
       {
-        u32 size_of_nand = p.GetOffsetFromPreviousPosition(previous_position) - sizeof(u32);
-        memcpy(previous_position, &size_of_nand, sizeof(u32));
+        const u32 size_of_nand = p.GetOffsetFromPreviousPosition(nand_size_ptr) - sizeof(u32);
+        memcpy(nand_size_ptr, &size_of_nand, sizeof(size_of_nand));
       }
     }
   }
   else  // case where we're in read mode.
   {
+    u32 size_of_nand = 0;
     DoStateRead(p, "/tmp");
-    if (!movie.IsMovieActive() || !original_save_state_made_during_movie_recording ||
-        !Core::WiiRootIsTemporary() ||
-        (original_save_state_made_during_movie_recording !=
-         (movie.IsMovieActive() && Core::WiiRootIsTemporary())))
+    if (is_full_nand_in_state && is_full_nand_wanted)
     {
-      (void)p.DoExternal(temp_val);
+      p.Do(size_of_nand);
+      DoStateRead(p, "/");
     }
     else
     {
-      p.Do(temp_val);
-      if (movie.IsMovieActive() && Core::WiiRootIsTemporary())
-        DoStateRead(p, "/");
+      // Skip over any NAND data without using it.
+      (void)p.DoExternal(size_of_nand);
     }
   }
 
@@ -461,13 +453,12 @@ ResultCode HostFileSystem::Format(Uid uid)
 ResultCode HostFileSystem::CreateFileOrDirectory(Uid uid, Gid gid, const std::string& path,
                                                  FileAttribute attr, Modes modes, bool is_file)
 {
-  if (!IsValidNonRootPath(path) ||
-      !std::all_of(path.begin(), path.end(), Common::IsPrintableCharacter))
+  if (!IsValidNonRootPath(path) || !std::ranges::all_of(path, Common::IsPrintableCharacter))
   {
     return ResultCode::Invalid;
   }
 
-  if (!is_file && std::count(path.begin(), path.end(), '/') > int(MaxPathDepth))
+  if (!is_file && std::ranges::count(path, '/') > int(MaxPathDepth))
     return ResultCode::TooManyPathComponents;
 
   const auto split_path = SplitPathAndBasename(path);
@@ -516,14 +507,14 @@ ResultCode HostFileSystem::CreateDirectory(Uid uid, Gid gid, const std::string& 
 
 bool HostFileSystem::IsFileOpened(const std::string& path) const
 {
-  return std::any_of(m_handles.begin(), m_handles.end(), [&path](const Handle& handle) {
+  return std::ranges::any_of(m_handles, [&path](const Handle& handle) {
     return handle.opened && handle.wii_path == path;
   });
 }
 
 bool HostFileSystem::IsDirectoryInUse(const std::string& path) const
 {
-  return std::any_of(m_handles.begin(), m_handles.end(), [&path](const Handle& handle) {
+  return std::ranges::any_of(m_handles, [&path](const Handle& handle) {
     return handle.opened && handle.wii_path.starts_with(path);
   });
 }
@@ -553,8 +544,7 @@ ResultCode HostFileSystem::Delete(Uid uid, Gid gid, const std::string& path)
   else
     return ResultCode::InUse;
 
-  const auto it = std::find_if(parent->children.begin(), parent->children.end(),
-                               GetNamePredicate(split_path.file_name));
+  const auto it = std::ranges::find(parent->children, split_path.file_name, &FstEntry::name);
   if (it != parent->children.end())
     parent->children.erase(it);
   SaveFst();
@@ -643,8 +633,8 @@ ResultCode HostFileSystem::Rename(Uid uid, Gid gid, const std::string& old_path,
   new_entry->name = split_new_path.file_name;
 
   // Finally, remove the child from the old parent and move it to the new parent.
-  const auto it = std::find_if(old_parent->children.begin(), old_parent->children.end(),
-                               GetNamePredicate(split_old_path.file_name));
+  const auto it =
+      std::ranges::find(old_parent->children, split_old_path.file_name, &FstEntry::name);
   if (it != old_parent->children.end())
   {
     new_entry->data = it->data;
@@ -694,17 +684,17 @@ Result<std::vector<std::string>> HostFileSystem::ReadDirectory(Uid uid, Gid gid,
 
   // Now sort in reverse order because Nintendo traverses a linked list
   // in which new elements are inserted at the front.
-  std::sort(host_entry.children.begin(), host_entry.children.end(),
-            [&get_key](const File::FSTEntry& one, const File::FSTEntry& two) {
-              const int key1 = get_key(one.virtualName);
-              const int key2 = get_key(two.virtualName);
-              if (key1 != key2)
-                return key1 > key2;
+  std::ranges::sort(host_entry.children,
+                    [&get_key](const File::FSTEntry& one, const File::FSTEntry& two) {
+                      const int key1 = get_key(one.virtualName);
+                      const int key2 = get_key(two.virtualName);
+                      if (key1 != key2)
+                        return key1 > key2;
 
-              // For files that are not in the FST, sort lexicographically to ensure that
-              // results are consistent no matter what the underlying filesystem is.
-              return one.virtualName > two.virtualName;
-            });
+                      // For files that are not in the FST, sort lexicographically to ensure that
+                      // results are consistent no matter what the underlying filesystem is.
+                      return one.virtualName > two.virtualName;
+                    });
 
   std::vector<std::string> output;
   for (const File::FSTEntry& child : host_entry.children)

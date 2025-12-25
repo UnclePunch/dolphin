@@ -4,11 +4,12 @@
 #include "Core/PowerPC/Jit64/Jit.h"
 
 #include <map>
+#include <span>
 #include <sstream>
 #include <string>
 
-#include <disasm.h>
 #include <fmt/format.h>
+#include <fmt/ostream.h>
 
 // for the PROFILER stuff
 #ifdef _WIN32
@@ -18,6 +19,7 @@
 #include "Common/CommonTypes.h"
 #include "Common/EnumUtils.h"
 #include "Common/GekkoDisassembler.h"
+#include "Common/HostDisassembler.h"
 #include "Common/IOFile.h"
 #include "Common/Logging/Log.h"
 #include "Common/StringUtil.h"
@@ -30,6 +32,7 @@
 #include "Core/HW/GPFifo.h"
 #include "Core/HW/Memmap.h"
 #include "Core/HW/ProcessorInterface.h"
+#include "Core/Host.h"
 #include "Core/MachineContext.h"
 #include "Core/PatchEngine.h"
 #include "Core/PowerPC/Interpreter/Interpreter.h"
@@ -39,6 +42,7 @@
 #include "Core/PowerPC/Jit64Common/Jit64Constants.h"
 #include "Core/PowerPC/Jit64Common/Jit64PowerPCState.h"
 #include "Core/PowerPC/Jit64Common/TrampolineCache.h"
+#include "Core/PowerPC/JitCommon/ConstantPropagation.h"
 #include "Core/PowerPC/JitInterface.h"
 #include "Core/PowerPC/MMU.h"
 #include "Core/PowerPC/PPCAnalyst.h"
@@ -116,7 +120,9 @@ using namespace PowerPC;
     and such, but it's currently limited to integer ops only. This can definitely be made better.
 */
 
-Jit64::Jit64(Core::System& system) : JitBase(system), QuantizedMemoryRoutines(*this)
+Jit64::Jit64(Core::System& system)
+    : JitBase(system), QuantizedMemoryRoutines(*this),
+      m_disassembler(HostDisassembler::Factory(HostDisassembler::Platform::x86_64))
 {
 }
 
@@ -202,7 +208,7 @@ bool Jit64::BackPatch(SContext* ctx)
 
   // Patch the original memory operation.
   XEmitter emitter(start, start + info.len);
-  emitter.JMP(trampoline, Jump::Near);
+  emitter.JMP(trampoline);
   // NOPs become dead code
   const u8* end = info.start + info.len;
   for (const u8* i = emitter.GetCodePtr(); i < end; ++i)
@@ -308,6 +314,18 @@ void Jit64::ClearCache()
   RefreshConfig();
   asm_routines.Regenerate();
   ResetFreeMemoryRanges();
+  Host_JitCacheInvalidation();
+}
+
+void Jit64::FreeRanges()
+{
+  // Check if any code blocks have been freed in the block cache and transfer this information to
+  // the local rangesets to allow overwriting them with new code.
+  for (const auto& [from, to] : blocks.GetRangesToFreeNear())
+    m_free_ranges_near.insert(from, to);
+  for (const auto& [from, to] : blocks.GetRangesToFreeFar())
+    m_free_ranges_far.insert(from, to);
+  blocks.ClearRangesToFree();
 }
 
 void Jit64::ResetFreeMemoryRanges()
@@ -333,8 +351,9 @@ void Jit64::Shutdown()
 
 void Jit64::FallBackToInterpreter(UGeckoInstruction inst)
 {
-  gpr.Flush();
-  fpr.Flush();
+  FlushCarry();
+  gpr.Flush(BitSet32(0xFFFFFFFF), RegCache::IgnoreDiscardedRegisters::Yes);
+  fpr.Flush(BitSet32(0xFFFFFFFF), RegCache::IgnoreDiscardedRegisters::Yes);
 
   if (js.op->canEndBlock)
   {
@@ -351,6 +370,12 @@ void Jit64::FallBackToInterpreter(UGeckoInstruction inst)
   // we must mark them as no longer discarded
   gpr.Reset(js.op->regsOut);
   fpr.Reset(js.op->GetFregsOut());
+
+  // We must also update constant propagation
+  m_constant_propagation.ClearGPRs(js.op->regsOut);
+
+  if (js.op->opinfo->flags & FL_SET_MSR)
+    EmitUpdateMembase();
 
   if (js.op->canEndBlock)
   {
@@ -577,7 +602,10 @@ void Jit64::JustWriteExit(u32 destination, bool bl, u32 after)
     J_CC(CC_LE, asm_routines.do_timing);
 
     linkData.exitPtrs = GetWritableCodePtr();
-    JMP(asm_routines.dispatcher_no_timing_check, Jump::Near);
+    // Padding required for correctness, as the JMP length might differ between dispatcher and
+    // linked block: if this wrote a Short JMP but then JitBlockCache::WriteLinkBlock wrote a Near
+    // JMP, the latter would overwrite other instructions.
+    JMP(asm_routines.dispatcher_no_timing_check, true);
   }
 
   b->linkData.push_back(linkData);
@@ -605,7 +633,7 @@ void Jit64::WriteExitDestInRSCRATCH(bool bl, u32 after)
   }
   else
   {
-    JMP(asm_routines.dispatcher, Jump::Near);
+    JMP(asm_routines.dispatcher);
   }
 }
 
@@ -643,7 +671,7 @@ void Jit64::WriteRfiExitDestInRSCRATCH()
   ABI_PopRegistersAndAdjustStack({}, 0);
   EmitUpdateMembase();
   SUB(32, PPCSTATE(downcount), Imm32(js.downcountAmount));
-  JMP(asm_routines.dispatcher, Jump::Near);
+  JMP(asm_routines.dispatcher);
 }
 
 void Jit64::WriteIdleExit(u32 destination)
@@ -665,7 +693,7 @@ void Jit64::WriteExceptionExit()
   ABI_PopRegistersAndAdjustStack({}, 0);
   EmitUpdateMembase();
   SUB(32, PPCSTATE(downcount), Imm32(js.downcountAmount));
-  JMP(asm_routines.dispatcher, Jump::Near);
+  JMP(asm_routines.dispatcher);
 }
 
 void Jit64::WriteExternalExceptionExit()
@@ -678,7 +706,7 @@ void Jit64::WriteExternalExceptionExit()
   ABI_PopRegistersAndAdjustStack({}, 0);
   EmitUpdateMembase();
   SUB(32, PPCSTATE(downcount), Imm32(js.downcountAmount));
-  JMP(asm_routines.dispatcher, Jump::Near);
+  JMP(asm_routines.dispatcher);
 }
 
 void Jit64::Run()
@@ -746,14 +774,7 @@ void Jit64::Jit(u32 em_address, bool clear_cache_and_retry_on_failure)
     }
     ClearCache();
   }
-
-  // Check if any code blocks have been freed in the block cache and transfer this information to
-  // the local rangesets to allow overwriting them with new code.
-  for (auto range : blocks.GetRangesToFreeNear())
-    m_free_ranges_near.insert(range.first, range.second);
-  for (auto range : blocks.GetRangesToFreeFar())
-    m_free_ranges_far.insert(range.first, range.second);
-  blocks.ClearRangesToFree();
+  FreeRanges();
 
   std::size_t block_size = m_code_buffer.size();
 
@@ -822,7 +843,11 @@ void Jit64::Jit(u32 em_address, bool clear_cache_and_retry_on_failure)
       b->far_begin = far_start;
       b->far_end = far_end;
 
-      blocks.FinalizeBlock(*b, jo.enableBlocklink, code_block.m_physical_addresses);
+      blocks.FinalizeBlock(*b, jo.enableBlocklink, code_block, m_code_buffer);
+
+#ifdef JIT_LOG_GENERATED_CODE
+      LogGeneratedCode();
+#endif
       return;
     }
   }
@@ -901,6 +926,8 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
   gpr.Start();
   fpr.Start();
 
+  m_constant_propagation.Clear();
+
   js.downcountAmount = 0;
   js.skipInstructions = 0;
   js.carryFlag = CarryFlag::InPPCState;
@@ -922,7 +949,7 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
       ABI_CallFunctionPC(JitInterface::CompileExceptionCheckFromJIT, &m_system.GetJitInterface(),
                          static_cast<u32>(JitInterface::ExceptionType::PairedQuantize));
       ABI_PopRegistersAndAdjustStack({}, 0);
-      JMP(asm_routines.dispatcher_no_check, Jump::Near);
+      JMP(asm_routines.dispatcher_no_check);
       SwitchToNearCode();
 
       // Insert a check that the GQRs are still the value we expect at
@@ -1050,7 +1077,7 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
         Cleanup();
         MOV(32, PPCSTATE(npc), Imm32(op.address));
         SUB(32, PPCSTATE(downcount), Imm32(js.downcountAmount));
-        JMP(asm_routines.dispatcher_exit, Jump::Near);
+        JMP(asm_routines.dispatcher_exit);
 
         SetJumpTarget(noBreakpoint);
       }
@@ -1085,21 +1112,55 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
       {
         gpr.Flush();
         fpr.Flush();
+        m_constant_propagation.Clear();
+
+        CompileInstruction(op);
       }
       else
       {
-        // If we have an input register that is going to be used again, load it pre-emptively,
-        // even if the instruction doesn't strictly need it in a register, to avoid redundant
-        // loads later. Of course, don't do this if we're already out of registers.
-        // As a bit of a heuristic, make sure we have at least one register left over for the
-        // output, which needs to be bound in the actual instruction compilation.
-        // TODO: make this smarter in the case that we're actually register-starved, i.e.
-        // prioritize the more important registers.
-        gpr.PreloadRegisters(op.regsIn & op.gprInUse & ~op.gprDiscardable);
-        fpr.PreloadRegisters(op.fregsIn & op.fprInXmm & ~op.fprDiscardable);
-      }
+        const JitCommon::ConstantPropagationResult constant_propagation_result =
+            m_constant_propagation.EvaluateInstruction(op.inst, opinfo->flags);
 
-      CompileInstruction(op);
+        if (!constant_propagation_result.instruction_fully_executed)
+        {
+          if (!bJITRegisterCacheOff)
+          {
+            // If we have an input register that is going to be used again, load it pre-emptively,
+            // even if the instruction doesn't strictly need it in a register, to avoid redundant
+            // loads later. Of course, don't do this if we're already out of registers.
+            // As a bit of a heuristic, make sure we have at least one register left over for the
+            // output, which needs to be bound in the actual instruction compilation.
+            // TODO: make this smarter in the case that we're actually register-starved, i.e.
+            // prioritize the more important registers.
+            gpr.PreloadRegisters(op.regsIn & op.gprInUse & ~op.gprDiscardable);
+            fpr.PreloadRegisters(op.fregsIn & op.fprInXmm & ~op.fprDiscardable);
+          }
+
+          CompileInstruction(op);
+        }
+
+        m_constant_propagation.Apply(constant_propagation_result);
+
+        if (constant_propagation_result.gpr >= 0)
+        {
+          // Mark the GPR as dirty in the register cache
+          gpr.SetImmediate32(constant_propagation_result.gpr,
+                             constant_propagation_result.gpr_value);
+        }
+
+        if (constant_propagation_result.instruction_fully_executed)
+        {
+          if (constant_propagation_result.carry)
+            FinalizeCarry(*constant_propagation_result.carry);
+
+          if (constant_propagation_result.overflow)
+            GenerateConstantOverflow(*constant_propagation_result.overflow);
+
+          // FinalizeImmediateRC is called last, because it may trigger branch merging
+          if (constant_propagation_result.compute_rc)
+            FinalizeImmediateRC(constant_propagation_result.gpr_value);
+        }
+      }
 
       js.fpr_is_store_safe = op.fprIsStoreSafeAfterInst;
 
@@ -1178,6 +1239,12 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
     WriteExit(nextPC);
   }
 
+  // When linking to an entry point immediately following it in memory, a JIT block's furthest
+  // exit can, as a micro-optimization, overwrite the JMP instruction with a multibyte NOP.
+  // See: 'JitBlockCache::WriteLinkBlock'
+  // In order to do this in a non-sketchy way, a JIT block must own the alignment padding bytes.
+  AlignCode4();  // TODO: Test if this or AlignCode16 make a difference from GetCodePtr
+
   if (HasWriteFailed() || m_far_code.HasWriteFailed())
   {
     if (HasWriteFailed())
@@ -1188,14 +1255,28 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
     return false;
   }
 
-  b->codeSize = static_cast<u32>(GetCodePtr() - b->normalEntry);
-  b->originalSize = code_block.m_num_instructions;
-
-#ifdef JIT_LOG_GENERATED_CODE
-  LogGeneratedX86(code_block.m_num_instructions, m_code_buffer, start, b);
-#endif
-
   return true;
+}
+
+void Jit64::EraseSingleBlock(const JitBlock& block)
+{
+  blocks.EraseSingleBlock(block);
+  FreeRanges();
+}
+
+std::vector<JitBase::MemoryStats> Jit64::GetMemoryStats() const
+{
+  return {{"near", m_free_ranges_near.get_stats()}, {"far", m_free_ranges_far.get_stats()}};
+}
+
+std::size_t Jit64::DisassembleNearCode(const JitBlock& block, std::ostream& stream) const
+{
+  return m_disassembler->Disassemble(block.normalEntry, block.near_end, stream);
+}
+
+std::size_t Jit64::DisassembleFarCode(const JitBlock& block, std::ostream& stream) const
+{
+  return m_disassembler->Disassemble(block.far_begin, block.far_end, stream);
 }
 
 BitSet8 Jit64::ComputeStaticGQRs(const PPCAnalyst::CodeBlock& cb) const
@@ -1250,12 +1331,31 @@ void Jit64::IntializeSpeculativeConstants()
         ABI_CallFunctionPC(JitInterface::CompileExceptionCheckFromJIT, &m_system.GetJitInterface(),
                            static_cast<u32>(JitInterface::ExceptionType::SpeculativeConstants));
         ABI_PopRegistersAndAdjustStack({}, 0);
-        JMP(asm_routines.dispatcher_no_check, Jump::Near);
+        JMP(asm_routines.dispatcher_no_check);
         SwitchToNearCode();
       }
       CMP(32, PPCSTATE_GPR(i), Imm32(compileTimeValue));
       J_CC(CC_NZ, target);
       gpr.SetImmediate32(i, compileTimeValue, false);
+    }
+  }
+}
+
+void Jit64::FlushRegistersBeforeSlowAccess()
+{
+  // Register values can be used by memory watchpoint conditions.
+  MemChecks& mem_checks = m_system.GetPowerPC().GetMemChecks();
+  if (mem_checks.HasAny())
+  {
+    BitSet32 gprs = mem_checks.GetGPRsUsedInConditions();
+    BitSet32 fprs = mem_checks.GetFPRsUsedInConditions();
+    if (gprs || fprs)
+    {
+      RCForkGuard gpr_guard = gpr.Fork();
+      RCForkGuard fpr_guard = fpr.Fork();
+
+      gpr.Flush(gprs);
+      fpr.Flush(fprs);
     }
   }
 }
@@ -1277,39 +1377,24 @@ bool Jit64::HandleFunctionHooking(u32 address)
   return true;
 }
 
-void LogGeneratedX86(size_t size, const PPCAnalyst::CodeBuffer& code_buffer, const u8* normalEntry,
-                     const JitBlock* b)
+void Jit64::LogGeneratedCode() const
 {
-  for (size_t i = 0; i < size; i++)
+  std::ostringstream stream;
+
+  stream << "\nPPC Code Buffer:\n";
+  for (const PPCAnalyst::CodeOp& op :
+       std::span{m_code_buffer.data(), code_block.m_num_instructions})
   {
-    const PPCAnalyst::CodeOp& op = code_buffer[i];
-    const std::string disasm = Common::GekkoDisassembler::Disassemble(op.inst.hex, op.address);
-    DEBUG_LOG_FMT(DYNA_REC, "IR_X86 PPC: {:08x} {}\n", op.address, disasm);
+    fmt::print(stream, "0x{:08x}\t\t{}\n", op.address,
+               Common::GekkoDisassembler::Disassemble(op.inst.hex, op.address));
   }
 
-  disassembler x64disasm;
-  x64disasm.set_syntax_intel();
+  const JitBlock* const block = js.curBlock;
+  stream << "\nHost Near Code:\n";
+  m_disassembler->Disassemble(block->normalEntry, block->near_end, stream);
+  stream << "\nHost Far Code:\n";
+  m_disassembler->Disassemble(block->far_begin, block->far_end, stream);
 
-  u64 disasmPtr = reinterpret_cast<u64>(normalEntry);
-  const u8* end = normalEntry + b->codeSize;
-
-  while (reinterpret_cast<u8*>(disasmPtr) < end)
-  {
-    char sptr[1000] = "";
-    disasmPtr += x64disasm.disasm64(disasmPtr, disasmPtr, reinterpret_cast<u8*>(disasmPtr), sptr);
-    DEBUG_LOG_FMT(DYNA_REC, "IR_X86 x86: {}", sptr);
-  }
-
-  if (b->codeSize <= 250)
-  {
-    std::ostringstream ss;
-    ss << std::hex;
-    for (u8 i = 0; i <= b->codeSize; i++)
-    {
-      ss.width(2);
-      ss.fill('0');
-      ss << static_cast<u32>(*(normalEntry + i));
-    }
-    DEBUG_LOG_FMT(DYNA_REC, "IR_X86 bin: {}\n\n\n", ss.str());
-  }
+  // TODO C++20: std::ostringstream::view()
+  DEBUG_LOG_FMT(DYNA_REC, "{}", std::move(stream).str());
 }

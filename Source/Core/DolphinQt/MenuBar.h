@@ -12,6 +12,9 @@
 #include <QPointer>
 
 #include "Common/CommonTypes.h"
+#ifdef RC_CLIENT_SUPPORTS_RAINTEGRATION
+#include "Common/HookableEvent.h"
+#endif  // RC_CLIENT_SUPPORTS_RAINTEGRATION
 
 class QMenu;
 class ParallelProgressDialog;
@@ -44,6 +47,9 @@ public:
   explicit MenuBar(QWidget* parent = nullptr);
 
   void UpdateToolsMenu(Core::State state);
+#ifdef RC_CLIENT_SUPPORTS_RAINTEGRATION
+  void UpdateAchievementDevelopmentMenu();
+#endif  // RC_CLIENT_SUPPORTS_RAINTEGRATION
 
   QMenu* GetListColumnsMenu() const { return m_cols_menu; }
 
@@ -91,6 +97,8 @@ signals:
   void ShowResourcePackManager();
   void ShowSkylanderPortal();
   void ShowInfinityBase();
+  void ShowWiiSpeakWindow();
+  void ShowLogitechMicWindow();
   void ConnectWiiRemote(int id);
 
 #ifdef USE_RETRO_ACHIEVEMENTS
@@ -125,8 +133,11 @@ signals:
   void RecordingStatusChanged(bool recording);
   void ReadOnlyModeChanged(bool read_only);
 
+  void ConfigureOSD();
+
 private:
   void OnEmulationStateChanged(Core::State state);
+  void OnConfigChanged();
 
   void AddFileMenu();
 
@@ -152,6 +163,7 @@ private:
 
   void InstallWAD();
   void ImportWiiSave();
+  void ImportWiiSaves();
   void ExportWiiSaves();
   void CheckNAND();
   void NANDExtractCertificates();
@@ -185,6 +197,7 @@ private:
   void OnRecordingStatusChanged(bool recording);
   void OnReadOnlyModeChanged(bool read_only);
   void OnDebugModeToggled(bool enabled);
+  void OnWipeJitBlockProfilingData();
   void OnWriteJitBlockLogDump();
 
   QString GetSignatureSelector() const;
@@ -203,6 +216,10 @@ private:
   QAction* m_wad_install_action;
   QMenu* m_perform_online_update_menu;
   QAction* m_perform_online_update_for_current_region;
+  QAction* m_achievements_action;
+#ifdef RC_CLIENT_SUPPORTS_RAINTEGRATION
+  QMenu* m_achievements_dev_menu;
+#endif  // RC_CLIENT_SUPPORTS_RAINTEGRATION
   QAction* m_ntscj_ipl;
   QAction* m_ntscu_ipl;
   QAction* m_pal_ipl;
@@ -212,6 +229,7 @@ private:
   QAction* m_extract_certificates;
   std::array<QAction*, 5> m_wii_remotes;
   QAction* m_import_wii_save;
+  QAction* m_import_wii_saves;
   QAction* m_export_wii_saves;
 
   // Emulation
@@ -236,6 +254,7 @@ private:
   QAction* m_recording_start;
   QAction* m_recording_stop;
   QAction* m_recording_read_only;
+  QAction* m_movie_window;
 
   // Options
   QAction* m_boot_to_pause;
@@ -270,6 +289,7 @@ private:
   QAction* m_jit_log_coverage;
   QAction* m_jit_search_instruction;
   QAction* m_jit_profile_blocks;
+  QAction* m_jit_wipe_profiling_data;
   QAction* m_jit_write_cache_log_dump;
   QAction* m_jit_off;
   QAction* m_jit_loadstore_off;
@@ -286,4 +306,8 @@ private:
   QAction* m_jit_register_cache_off;
 
   bool m_game_selected = false;
+
+#ifdef RC_CLIENT_SUPPORTS_RAINTEGRATION
+  Common::EventHook m_raintegration_event_hook;
+#endif  // RC_CLIENT_SUPPORTS_RAINTEGRATION
 };

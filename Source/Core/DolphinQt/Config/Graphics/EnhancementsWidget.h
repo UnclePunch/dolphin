@@ -3,47 +3,56 @@
 
 #pragma once
 
-#include <array>
-
 #include <QWidget>
 
 class ConfigBool;
 class ConfigChoice;
-class ConfigSlider;
-class GraphicsWindow;
-class QCheckBox;
-class QComboBox;
+class ConfigComplexChoice;
+class ConfigStringChoice;
+class ConfigFloatSlider;
+class GraphicsPane;
 class QPushButton;
-class QSlider;
-class ToolTipComboBox;
+class QLabel;
 class ToolTipPushButton;
-enum class StereoMode : int;
+
+namespace Config
+{
+template <typename T>
+class Info;
+class Layer;
+}  // namespace Config
 
 class EnhancementsWidget final : public QWidget
 {
   Q_OBJECT
 public:
-  explicit EnhancementsWidget(GraphicsWindow* parent);
+  explicit EnhancementsWidget(GraphicsPane* gfx_pane);
 
 private:
-  void LoadSettings();
-  void SaveSettings();
+  template <typename T>
+  T ReadSetting(const Config::Info<T>& setting) const;
 
   void CreateWidgets();
   void ConnectWidgets();
   void AddDescriptions();
+
+  void OnBackendChanged();
+  void UpdateAntialiasingOptions();
+  void LoadPostProcessingShaders();
+  void ShaderChanged();
+  void OnConfigChanged();
+
   void ConfigureColorCorrection();
   void ConfigurePostProcessingShader();
-  void LoadPPShaders(StereoMode stereo_mode);
 
   // Enhancements
   ConfigChoice* m_ir_combo;
-  ToolTipComboBox* m_aa_combo;
-  ToolTipComboBox* m_texture_filtering_combo;
-  ToolTipComboBox* m_output_resampling_combo;
-  ToolTipComboBox* m_pp_effect;
+  ConfigComplexChoice* m_antialiasing_combo;
+  ConfigComplexChoice* m_texture_filtering_combo;
+  ConfigChoice* m_output_resampling_combo;
+  ConfigStringChoice* m_post_processing_effect;
   ToolTipPushButton* m_configure_color_correction;
-  QPushButton* m_configure_pp_effect;
+  QPushButton* m_configure_post_processing_effect;
   ConfigBool* m_scaled_efb_copy;
   ConfigBool* m_per_pixel_lighting;
   ConfigBool* m_widescreen_hack;
@@ -55,11 +64,12 @@ private:
 
   // Stereoscopy
   ConfigChoice* m_3d_mode;
-  ConfigSlider* m_3d_depth;
-  ConfigSlider* m_3d_convergence;
+  ConfigFloatSlider* m_3d_depth;
+  QLabel* m_3d_depth_value;
+  ConfigFloatSlider* m_3d_convergence;
+  QLabel* m_3d_convergence_value;
   ConfigBool* m_3d_swap_eyes;
   ConfigBool* m_3d_per_eye_resolution;
 
-  int m_msaa_modes;
-  bool m_block_save;
+  Config::Layer* m_game_layer = nullptr;
 };

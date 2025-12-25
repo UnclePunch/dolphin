@@ -82,9 +82,9 @@ enum class LogLevel : int
 };
 
 #if defined(_DEBUG) || defined(DEBUGFAST)
-constexpr auto MAX_LOGLEVEL = Common::Log::LogLevel::LDEBUG;
+constexpr auto MAX_EFFECTIVE_LOGLEVEL = Common::Log::LogLevel::LDEBUG;
 #else
-constexpr auto MAX_LOGLEVEL = Common::Log::LogLevel::LINFO;
+constexpr auto MAX_EFFECTIVE_LOGLEVEL = Common::Log::LogLevel::LINFO;
 #endif  // logging
 
 static const char LOG_LEVEL_TO_CHAR[7] = "-NEWID";
@@ -99,7 +99,13 @@ void GenericLogFmt(LogLevel level, LogType type, const char* file, int line, con
   static_assert(NumFields == sizeof...(args),
                 "Unexpected number of replacement fields in format string; did you pass too few or "
                 "too many arguments?");
-  GenericLogFmtImpl(level, type, file, line, format, fmt::make_format_args(args...));
+
+#if FMT_VERSION >= 110000
+  auto&& format_str = fmt::format_string<Args...>(format);
+#else
+  auto&& format_str = format;
+#endif
+  GenericLogFmtImpl(level, type, file, line, format_str, fmt::make_format_args(args...));
 }
 }  // namespace Common::Log
 
@@ -108,7 +114,7 @@ void GenericLogFmt(LogLevel level, LogType type, const char* file, int line, con
 #define GENERIC_LOG_FMT(t, v, format, ...)                                                         \
   do                                                                                               \
   {                                                                                                \
-    if (v <= Common::Log::MAX_LOGLEVEL)                                                            \
+    if (v <= Common::Log::MAX_EFFECTIVE_LOGLEVEL)                                                  \
     {                                                                                              \
       /* Use a macro-like name to avoid shadowing warnings */                                      \
       constexpr auto GENERIC_LOG_FMT_N = Common::CountFmtReplacementFields(format);                \

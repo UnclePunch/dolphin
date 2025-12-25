@@ -31,9 +31,11 @@
 #include "Core/PowerPC/Jit64Common/BlockCache.h"
 #include "Core/PowerPC/Jit64Common/Jit64AsmCommon.h"
 #include "Core/PowerPC/Jit64Common/TrampolineCache.h"
+#include "Core/PowerPC/JitCommon/ConstantPropagation.h"
 #include "Core/PowerPC/JitCommon/JitBase.h"
 #include "Core/PowerPC/JitCommon/JitCache.h"
 
+class HostDisassembler;
 namespace PPCAnalyst
 {
 struct CodeBlock;
@@ -65,6 +67,12 @@ public:
   void Jit(u32 em_address, bool clear_cache_and_retry_on_failure);
   bool DoJit(u32 em_address, JitBlock* b, u32 nextPC);
 
+  void EraseSingleBlock(const JitBlock& block) override;
+  std::vector<MemoryStats> GetMemoryStats() const override;
+
+  std::size_t DisassembleNearCode(const JitBlock& block, std::ostream& stream) const override;
+  std::size_t DisassembleFarCode(const JitBlock& block, std::ostream& stream) const override;
+
   // Finds a free memory region and sets the near and far code emitters to point at that region.
   // Returns false if no free memory region can be found for either of the two.
   bool SetEmitterStateToFreeCodeRegion();
@@ -73,6 +81,10 @@ public:
   BitSet8 ComputeStaticGQRs(const PPCAnalyst::CodeBlock&) const;
 
   void IntializeSpeculativeConstants();
+
+  void FlushRegistersBeforeSlowAccess();
+
+  JitCommon::ConstantPropagation& GetConstantPropagation() { return m_constant_propagation; }
 
   JitBlockCache* GetBlockCache() override { return &blocks; }
   void Trace();
@@ -112,7 +124,9 @@ public:
   void FinalizeCarryOverflow(bool oe, bool inv = false);
   void FinalizeCarry(Gen::CCFlags cond);
   void FinalizeCarry(bool ca);
+  void FlushCarry();
   void ComputeRC(preg_t preg, bool needs_test = true, bool needs_sext = true);
+  void FinalizeImmediateRC(s32 value);
 
   void AndWithMask(Gen::X64Reg reg, u32 mask);
   void RotateLeft(int bits, Gen::X64Reg regOp, const Gen::OpArg& arg, u8 rotate);
@@ -266,7 +280,10 @@ private:
 
   bool HandleFunctionHooking(u32 address);
 
+  void FreeRanges();
   void ResetFreeMemoryRanges();
+
+  void LogGeneratedCode() const;
 
   static void ImHere(Jit64& jit);
 
@@ -276,6 +293,8 @@ private:
   GPRRegCache gpr{*this};
   FPURegCache fpr{*this};
 
+  JitCommon::ConstantPropagation m_constant_propagation;
+
   Jit64AsmRoutineManager asm_routines{*this};
 
   HyoutaUtilities::RangeSizeSet<u8*> m_free_ranges_near;
@@ -284,7 +303,5 @@ private:
   const bool m_im_here_debug = false;
   const bool m_im_here_log = false;
   std::map<u32, int> m_been_here;
+  std::unique_ptr<HostDisassembler> m_disassembler;
 };
-
-void LogGeneratedX86(size_t size, const PPCAnalyst::CodeBuffer& code_buffer, const u8* normalEntry,
-                     const JitBlock* b);

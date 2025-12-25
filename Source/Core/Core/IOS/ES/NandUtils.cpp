@@ -79,8 +79,7 @@ static bool IsValidPartOfTitleID(const std::string& string)
 {
   if (string.length() != 8)
     return false;
-  return std::all_of(string.begin(), string.end(),
-                     [](const auto character) { return std::isxdigit(character) != 0; });
+  return std::ranges::all_of(string, Common::IsXDigit);
 }
 
 static std::vector<u64> GetTitlesInTitleOrImport(FS::FileSystem* fs, const std::string& titles_dir)
@@ -219,11 +218,10 @@ ESCore::GetStoredContentsFromTMD(const ES::TMDReader& tmd,
 u32 ESCore::GetSharedContentsCount() const
 {
   const auto entries = m_ios.GetFS()->ReadDirectory(PID_KERNEL, PID_KERNEL, "/shared1");
-  return static_cast<u32>(
-      std::count_if(entries->begin(), entries->end(), [this](const std::string& entry) {
-        return !m_ios.GetFS()->ReadDirectory(PID_KERNEL, PID_KERNEL, "/shared1/" + entry) &&
-               entry.size() == 12 && entry.compare(8, 4, ".app") == 0;
-      }));
+  return static_cast<u32>(std::ranges::count_if(*entries, [this](const std::string& entry) {
+    return !m_ios.GetFS()->ReadDirectory(PID_KERNEL, PID_KERNEL, "/shared1/" + entry) &&
+           entry.size() == 12 && entry.compare(8, 4, ".app") == 0;
+  }));
 }
 
 std::vector<std::array<u8, 20>> ESCore::GetSharedContents() const

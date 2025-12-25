@@ -3,13 +3,22 @@
 
 #include "Core/PowerPC/CachedInterpreter/CachedInterpreter.h"
 
+#include <span>
+#include <sstream>
+#include <utility>
+
+#include <fmt/format.h>
+#include <fmt/ostream.h>
+
 #include "Common/CommonTypes.h"
+#include "Common/GekkoDisassembler.h"
 #include "Common/Logging/Log.h"
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/CoreTiming.h"
 #include "Core/HLE/HLE.h"
 #include "Core/HW/CPU.h"
+#include "Core/Host.h"
 #include "Core/PowerPC/Gekko.h"
 #include "Core/PowerPC/Interpreter/Interpreter.h"
 #include "Core/PowerPC/Jit64Common/Jit64Constants.h"
@@ -57,10 +66,25 @@ void CachedInterpreter::ExecuteOneBlock()
   while (true)
   {
     const auto callback = *reinterpret_cast<const AnyCallback*>(normal_entry);
-    if (const auto distance = callback(ppc_state, normal_entry + sizeof(callback)))
-      normal_entry += distance;
+    const u8* payload = normal_entry + sizeof(callback);
+    // Direct dispatch to the most commonly used callbacks for better performance
+    if (callback == reinterpret_cast<AnyCallback>(CallbackCast(Interpret<false>))) [[likely]]
+    {
+      Interpret<false>(ppc_state, *reinterpret_cast<const InterpretOperands*>(payload));
+      normal_entry = payload + sizeof(InterpretOperands);
+    }
+    else if (callback == reinterpret_cast<AnyCallback>(CallbackCast(Interpret<true>)))
+    {
+      Interpret<true>(ppc_state, *reinterpret_cast<const InterpretOperands*>(payload));
+      normal_entry = payload + sizeof(InterpretOperands);
+    }
     else
-      break;
+    {
+      if (const auto distance = callback(ppc_state, payload))
+        normal_entry += distance;
+      else
+        break;
+    }
   }
 }
 
@@ -289,14 +313,15 @@ void CachedInterpreter::Jit(u32 em_address, bool clear_cache_and_retry_on_failur
       b->near_end = GetWritableCodePtr();
       b->far_begin = b->far_end = nullptr;
 
-      b->codeSize = static_cast<u32>(b->near_end - b->normalEntry);
-      b->originalSize = code_block.m_num_instructions;
-
       // Mark the memory region that this code block uses in the RangeSizeSet.
       if (b->near_begin != b->near_end)
         m_free_ranges.erase(b->near_begin, b->near_end);
 
-      m_block_cache.FinalizeBlock(*b, jo.enableBlocklink, code_block.m_physical_addresses);
+      m_block_cache.FinalizeBlock(*b, jo.enableBlocklink, code_block, m_code_buffer);
+
+#ifdef JIT_LOG_GENERATED_CODE
+      LogGeneratedCode();
+#endif
 
       return;
     }
@@ -370,15 +395,16 @@ bool CachedInterpreter::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
             {interpreter, Interpreter::GetInterpreterOp(op.inst), js.compilerPC, op.inst},
             power_pc,
             js.downcountAmount};
-        Write(op.canEndBlock ? InterpretAndCheckExceptions<true> :
-                               InterpretAndCheckExceptions<false>,
+        Write(op.canEndBlock ? CallbackCast(InterpretAndCheckExceptions<true>) :
+                               CallbackCast(InterpretAndCheckExceptions<false>),
               operands);
       }
       else
       {
         const InterpretOperands operands = {interpreter, Interpreter::GetInterpreterOp(op.inst),
                                             js.compilerPC, op.inst};
-        Write(op.canEndBlock ? Interpret<true> : Interpret<false>, operands);
+        Write(op.canEndBlock ? CallbackCast(Interpret<true>) : CallbackCast(Interpret<false>),
+              operands);
       }
 
       if (op.branchIsIdleLoop)
@@ -401,6 +427,29 @@ bool CachedInterpreter::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
   return true;
 }
 
+void CachedInterpreter::EraseSingleBlock(const JitBlock& block)
+{
+  m_block_cache.EraseSingleBlock(block);
+  FreeRanges();
+}
+
+std::vector<JitBase::MemoryStats> CachedInterpreter::GetMemoryStats() const
+{
+  return {{"free", m_free_ranges.get_stats()}};
+}
+
+std::size_t CachedInterpreter::DisassembleNearCode(const JitBlock& block,
+                                                   std::ostream& stream) const
+{
+  return Disassemble(block, stream);
+}
+
+std::size_t CachedInterpreter::DisassembleFarCode(const JitBlock& block, std::ostream& stream) const
+{
+  stream << "N/A\n";
+  return 0;
+}
+
 void CachedInterpreter::ClearCache()
 {
   m_block_cache.Clear();
@@ -408,4 +457,24 @@ void CachedInterpreter::ClearCache()
   ClearCodeSpace();
   ResetFreeMemoryRanges();
   RefreshConfig();
+  Host_JitCacheInvalidation();
+}
+
+void CachedInterpreter::LogGeneratedCode() const
+{
+  std::ostringstream stream;
+
+  stream << "\nPPC Code Buffer:\n";
+  for (const PPCAnalyst::CodeOp& op :
+       std::span{m_code_buffer.data(), code_block.m_num_instructions})
+  {
+    fmt::print(stream, "0x{:08x}\t\t{}\n", op.address,
+               Common::GekkoDisassembler::Disassemble(op.inst.hex, op.address));
+  }
+
+  stream << "\nHost Code:\n";
+  Disassemble(*js.curBlock, stream);
+
+  // TODO C++20: std::ostringstream::view()
+  DEBUG_LOG_FMT(DYNA_REC, "{}", std::move(stream).str());
 }

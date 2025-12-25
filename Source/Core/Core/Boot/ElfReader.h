@@ -28,7 +28,7 @@ public:
   explicit ElfReader(const std::string& filename);
   explicit ElfReader(File::IOFile file);
   explicit ElfReader(std::vector<u8> buffer);
-  ~ElfReader();
+  ~ElfReader() override;
   u32 Read32(int off) const { return base32[off >> 2]; }
   // Quick accessors
   ElfType GetType() const { return (ElfType)(header->e_type); }
@@ -36,7 +36,8 @@ public:
   u32 GetEntryPoint() const override { return entryPoint; }
   u32 GetFlags() const { return (u32)(header->e_flags); }
   bool LoadIntoMemory(Core::System& system, bool only_in_mem1 = false) const override;
-  bool LoadSymbols(const Core::CPUThreadGuard& guard, PPCSymbolDB& ppc_symbol_db) const override;
+  bool LoadSymbols(const Core::CPUThreadGuard& guard, PPCSymbolDB& ppc_symbol_db,
+                   const std::string& filename) const override;
   // TODO: actually check for validity.
   bool IsValid() const override { return true; }
   bool IsWii() const override;

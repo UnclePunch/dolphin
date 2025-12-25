@@ -57,6 +57,7 @@ static void InvalidateCacheThreadSafe(Core::System& system, u64 userdata, s64 cy
 {
   system.GetPPCState().iCache.Invalidate(system.GetMemory(), system.GetJitInterface(),
                                          static_cast<u32>(userdata));
+  Host_JitCacheInvalidation();
 }
 
 PowerPCManager::PowerPCManager(Core::System& system)
@@ -128,10 +129,10 @@ void PowerPCManager::DoState(PointerWrap& p)
 
 void PowerPCManager::ResetRegisters()
 {
-  std::fill(std::begin(m_ppc_state.ps), std::end(m_ppc_state.ps), PairedSingle{});
-  std::fill(std::begin(m_ppc_state.sr), std::end(m_ppc_state.sr), 0U);
-  std::fill(std::begin(m_ppc_state.gpr), std::end(m_ppc_state.gpr), 0U);
-  std::fill(std::begin(m_ppc_state.spr), std::end(m_ppc_state.spr), 0U);
+  std::ranges::fill(m_ppc_state.ps, PairedSingle{});
+  std::ranges::fill(m_ppc_state.sr, 0U);
+  std::ranges::fill(m_ppc_state.gpr, 0U);
+  std::ranges::fill(m_ppc_state.spr, 0U);
 
   // Gamecube:
   // 0x00080200 = lonestar 2.0
@@ -296,6 +297,7 @@ void PowerPCManager::ScheduleInvalidateCacheThreadSafe(u32 address)
   {
     m_ppc_state.iCache.Invalidate(m_system.GetMemory(), m_system.GetJitInterface(),
                                   static_cast<u32>(address));
+    Host_JitCacheInvalidation();
   }
 }
 
@@ -566,8 +568,7 @@ void PowerPCManager::CheckExceptions()
     return;
   }
 
-  m_system.GetJitInterface().UpdateMembase();
-  MSRUpdated(m_ppc_state);
+  MSRUpdated();
 }
 
 void PowerPCManager::CheckExternalExceptions()
@@ -620,10 +621,8 @@ void PowerPCManager::CheckExternalExceptions()
       ERROR_LOG_FMT(POWERPC, "Unknown EXTERNAL INTERRUPT exception: Exceptions == {:08x}",
                     exceptions);
     }
-    MSRUpdated(m_ppc_state);
+    MSRUpdated();
   }
-
-  m_system.GetJitInterface().UpdateMembase();
 }
 
 bool PowerPCManager::CheckBreakPoints()
@@ -660,6 +659,19 @@ bool PowerPCManager::CheckAndHandleBreakPoints()
   return false;
 }
 
+void PowerPCManager::MSRUpdated()
+{
+  static_assert(UReg_MSR{}.DR.StartBit() == 4);
+  static_assert(UReg_MSR{}.IR.StartBit() == 5);
+  static_assert(FEATURE_FLAG_MSR_DR == 1 << 0);
+  static_assert(FEATURE_FLAG_MSR_IR == 1 << 1);
+
+  m_ppc_state.feature_flags = static_cast<CPUEmuFeatureFlags>(
+      (m_ppc_state.feature_flags & FEATURE_FLAG_PERFMON) | ((m_ppc_state.msr.Hex >> 4) & 0x3));
+
+  m_system.GetJitInterface().UpdateMembase();
+}
+
 void PowerPCState::SetSR(u32 index, u32 value)
 {
   DEBUG_LOG_FMT(POWERPC, "{:08x}: MMU: Segment register {} set to {:08x}", pc, index, value);
@@ -684,17 +696,6 @@ void RoundingModeUpdated(PowerPCState& ppc_state)
   ASSERT(Core::IsCPUThread());
 
   Common::FPU::SetSIMDMode(ppc_state.fpscr.RN, ppc_state.fpscr.NI);
-}
-
-void MSRUpdated(PowerPCState& ppc_state)
-{
-  static_assert(UReg_MSR{}.DR.StartBit() == 4);
-  static_assert(UReg_MSR{}.IR.StartBit() == 5);
-  static_assert(FEATURE_FLAG_MSR_DR == 1 << 0);
-  static_assert(FEATURE_FLAG_MSR_IR == 1 << 1);
-
-  ppc_state.feature_flags = static_cast<CPUEmuFeatureFlags>(
-      (ppc_state.feature_flags & FEATURE_FLAG_PERFMON) | ((ppc_state.msr.Hex >> 4) & 0x3));
 }
 
 void MMCRUpdated(PowerPCState& ppc_state)

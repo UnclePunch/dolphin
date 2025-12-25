@@ -17,7 +17,7 @@ class Host final : public QObject
   Q_OBJECT
 
 public:
-  ~Host();
+  ~Host() override;
 
   static Host* GetInstance();
 
@@ -40,6 +40,8 @@ signals:
   void RequestStop();
   void RequestRenderSize(int w, int h);
   void UpdateDisasmDialog();
+  void JitCacheInvalidation();
+  void JitProfileDataWiped();
   void PPCSymbolsChanged();
   void PPCBreakpointsChanged();
 

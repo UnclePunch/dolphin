@@ -15,6 +15,11 @@
 
 namespace IOS::HLE::USB
 {
+EmulationKernel& TransferCommand::GetEmulationKernel() const
+{
+  return m_ios;
+}
+
 std::unique_ptr<u8[]> TransferCommand::MakeBuffer(const size_t size) const
 {
   ASSERT_MSG(IOS_USB, data_address != 0, "Invalid data_address");
@@ -74,7 +79,7 @@ bool Device::HasClass(const u8 device_class) const
   if (GetDeviceDescriptor().bDeviceClass == device_class)
     return true;
   const auto interfaces = GetInterfaces(0);
-  return std::any_of(interfaces.begin(), interfaces.end(), [device_class](const auto& interface) {
+  return std::ranges::any_of(interfaces, [device_class](const auto& interface) {
     return interface.bInterfaceClass == device_class;
   });
 }

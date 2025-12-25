@@ -25,6 +25,7 @@ using std::isinf;
 using std::isnan;
 #include <expr.h>
 
+#include "Common/BitSet.h"
 #include "Common/CommonTypes.h"
 #include "Common/Logging/Log.h"
 #include "Core/Core.h"
@@ -34,57 +35,15 @@ using std::isnan;
 #include "Core/System.h"
 
 template <typename T>
-static T HostRead(const Core::CPUThreadGuard& guard, u32 address);
+static T HostRead(const Core::CPUThreadGuard& guard, u32 address)
+{
+  return PowerPC::MMU::HostRead<T>(guard, address);
+}
 
 template <typename T>
-static void HostWrite(const Core::CPUThreadGuard& guard, T var, u32 address);
-
-template <>
-u8 HostRead(const Core::CPUThreadGuard& guard, u32 address)
+static void HostWrite(const Core::CPUThreadGuard& guard, T var, u32 address)
 {
-  return PowerPC::MMU::HostRead_U8(guard, address);
-}
-
-template <>
-u16 HostRead(const Core::CPUThreadGuard& guard, u32 address)
-{
-  return PowerPC::MMU::HostRead_U16(guard, address);
-}
-
-template <>
-u32 HostRead(const Core::CPUThreadGuard& guard, u32 address)
-{
-  return PowerPC::MMU::HostRead_U32(guard, address);
-}
-
-template <>
-u64 HostRead(const Core::CPUThreadGuard& guard, u32 address)
-{
-  return PowerPC::MMU::HostRead_U64(guard, address);
-}
-
-template <>
-void HostWrite(const Core::CPUThreadGuard& guard, u8 var, u32 address)
-{
-  PowerPC::MMU::HostWrite_U8(guard, var, address);
-}
-
-template <>
-void HostWrite(const Core::CPUThreadGuard& guard, u16 var, u32 address)
-{
-  PowerPC::MMU::HostWrite_U16(guard, var, address);
-}
-
-template <>
-void HostWrite(const Core::CPUThreadGuard& guard, u32 var, u32 address)
-{
-  PowerPC::MMU::HostWrite_U32(guard, var, address);
-}
-
-template <>
-void HostWrite(const Core::CPUThreadGuard& guard, u64 var, u32 address)
-{
-  PowerPC::MMU::HostWrite_U64(guard, var, address);
+  PowerPC::MMU::HostWrite<T>(guard, var, address);
 }
 
 template <typename T, typename U = T>
@@ -136,15 +95,14 @@ static double CallstackFunc(expr_func* f, vec_expr_t* args, void* c)
   if (!std::isnan(num))
   {
     u32 address = static_cast<u32>(num);
-    return std::any_of(stack.begin(), stack.end(),
-                       [address](const auto& s) { return s.vAddress == address; });
+    return std::ranges::any_of(stack, [address](const auto& s) { return s.vAddress == address; });
   }
 
   const char* cstr = expr_get_str(&vec_nth(args, 0));
   if (cstr != nullptr)
   {
-    return std::any_of(stack.begin(), stack.end(),
-                       [cstr](const auto& s) { return s.Name.find(cstr) != std::string::npos; });
+    return std::ranges::any_of(
+        stack, [cstr](const auto& s) { return s.Name.find(cstr) != std::string::npos; });
   }
 
   return 0;
@@ -231,8 +189,7 @@ Expression::Expression(std::string_view text, ExprPointer ex, ExprVarListPointer
     : m_text(text), m_expr(std::move(ex)), m_vars(std::move(vars))
 {
   using LookupKV = std::pair<std::string_view, Expression::VarBinding>;
-  static constexpr auto sorted_lookup = []() consteval
-  {
+  static constexpr auto sorted_lookup = []() consteval {
     using enum Expression::VarBindingType;
     auto unsorted_lookup = std::to_array<LookupKV>({
         {"r0", {GPR, 0}},
@@ -386,8 +343,7 @@ Expression::Expression(std::string_view text, ExprPointer ex, ExprVarListPointer
     });
     std::ranges::sort(unsorted_lookup, {}, &LookupKV::first);
     return unsorted_lookup;
-  }
-  ();
+  }();
   static_assert(std::ranges::adjacent_find(sorted_lookup, {}, &LookupKV::first) ==
                     sorted_lookup.end(),
                 "Expression: Sorted lookup should not contain duplicate keys.");
@@ -450,9 +406,15 @@ void Expression::SynchronizeBindings(Core::System& system, SynchronizeDirection 
       break;
     case VarBindingType::SPR:
       if (dir == SynchronizeDirection::From)
+      {
         v->value = static_cast<double>(ppc_state.spr[bind->index]);
+      }
       else
+      {
         ppc_state.spr[bind->index] = static_cast<u32>(static_cast<s64>(v->value));
+        if (bind->index == SPR_SDR)
+          system.GetMMU().SDRUpdated();
+      }
       break;
     case VarBindingType::PCtr:
       if (dir == SynchronizeDirection::From)
@@ -460,9 +422,14 @@ void Expression::SynchronizeBindings(Core::System& system, SynchronizeDirection 
       break;
     case VarBindingType::MSR:
       if (dir == SynchronizeDirection::From)
+      {
         v->value = static_cast<double>(ppc_state.msr.Hex);
+      }
       else
+      {
         ppc_state.msr.Hex = static_cast<u32>(static_cast<s64>(v->value));
+        system.GetPowerPC().MSRUpdated();
+      }
       break;
     }
   }
@@ -494,4 +461,27 @@ void Expression::Reporting(const double result) const
 std::string Expression::GetText() const
 {
   return m_text;
+}
+
+void Expression::ComputeRegistersUsed()
+{
+  if (m_has_computed_registers_used)
+    return;
+
+  for (const VarBinding& bind : m_binds)
+  {
+    switch (bind.type)
+    {
+    case VarBindingType::GPR:
+      m_gprs_used[bind.index] = true;
+      break;
+    case VarBindingType::FPR:
+      m_fprs_used[bind.index] = true;
+      break;
+    default:
+      break;
+    }
+  }
+
+  m_has_computed_registers_used = true;
 }

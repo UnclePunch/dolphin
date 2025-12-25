@@ -105,9 +105,8 @@ constexpr u32 PLACEHOLDER = 0xDEADBEEF;
 
 static bool SetupMemory(Memory::MemoryManager& memory, u64 ios_title_id, MemorySetupType setup_type)
 {
-  auto target_imv = std::find_if(
-      GetMemoryValues().begin(), GetMemoryValues().end(),
-      [&](const MemoryValues& imv) { return imv.ios_number == (ios_title_id & 0xffff); });
+  auto target_imv = std::ranges::find(GetMemoryValues(), static_cast<u16>(ios_title_id & 0xffff),
+                                      &MemoryValues::ios_number);
 
   if (target_imv == GetMemoryValues().end())
   {
@@ -689,7 +688,13 @@ std::optional<IPCReply> EmulationKernel::OpenDevice(OpenRequest& request)
 
   if (!device)
   {
-    ERROR_LOG_FMT(IOS, "Unknown device: {}", request.path);
+    constexpr std::string_view cios_devices[] = {"/dev/flash", "/dev/mload", "/dev/sdio/sdhc",
+                                                 "/dev/usb123", "/dev/usb2"};
+    static_assert(std::ranges::is_sorted(cios_devices));
+    if (std::ranges::binary_search(cios_devices, request.path))
+      WARN_LOG_FMT(IOS, "Possible anti-piracy check for cIOS device {}", request.path);
+    else
+      ERROR_LOG_FMT(IOS, "Unknown device: {}", request.path);
     return IPCReply{IPC_ENOENT, 3700_tbticks};
   }
 
@@ -946,7 +951,7 @@ static void FinishPPCBootstrap(Core::System& system, u64 userdata, s64 cycles_la
 
   ASSERT(Core::IsCPUThread());
   Core::CPUThreadGuard guard(system);
-  SConfig::OnNewTitleLoad(guard);
+  SConfig::OnTitleDirectlyBooted(guard);
 
   INFO_LOG_FMT(IOS, "Bootstrapping done.");
 }

@@ -11,6 +11,7 @@
 #include "Common/Config/Config.h"
 #include "Common/FileUtil.h"
 
+#include "Core/Config/AchievementSettings.h"
 #include "Core/Config/GraphicsSettings.h"
 #include "Core/Config/MainSettings.h"
 #include "Core/Config/SYSCONFSettings.h"
@@ -33,11 +34,16 @@ public:
     layer->Set(Config::MAIN_CPU_THREAD, m_settings.cpu_thread);
     layer->Set(Config::MAIN_CPU_CORE, m_settings.cpu_core);
     layer->Set(Config::MAIN_ENABLE_CHEATS, m_settings.enable_cheats);
+#ifdef USE_RETRO_ACHIEVEMENTS
+    layer->Set(Config::RA_HARDCORE_ENABLED, m_settings.enable_hardcore);
+#endif  // USE_RETRO_ACHIEVEMENTS
     layer->Set(Config::MAIN_GC_LANGUAGE, m_settings.selected_language);
     layer->Set(Config::MAIN_OVERRIDE_REGION_SETTINGS, m_settings.override_region_settings);
     layer->Set(Config::MAIN_DSP_HLE, m_settings.dsp_hle);
     layer->Set(Config::MAIN_OVERCLOCK_ENABLE, m_settings.oc_enable);
     layer->Set(Config::MAIN_OVERCLOCK, m_settings.oc_factor);
+    layer->Set(Config::MAIN_VI_OVERCLOCK_ENABLE, m_settings.vi_oc_enable);
+    layer->Set(Config::MAIN_VI_OVERCLOCK, m_settings.vi_oc_factor);
     for (ExpansionInterface::Slot slot : ExpansionInterface::SLOTS)
       layer->Set(Config::GetInfoForEXIDevice(slot), m_settings.exi_device[slot]);
     layer->Set(Config::MAIN_MEMORY_CARD_SIZE, m_settings.memcard_size_override);

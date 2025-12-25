@@ -50,11 +50,6 @@ public:
 
   OPCODE_CALLBACK(CPState& GetCPState()) { return m_cpmem; }
 
-  OPCODE_CALLBACK(u32 GetVertexSize(u8 vat))
-  {
-    return VertexLoaderBase::GetVertexSize(GetCPState().vtx_desc, GetCPState().vtx_attr[vat]);
-  }
-
 private:
   void ProcessVertexComponent(CPArray array_index, VertexComponentFormat array_type,
                               u32 component_offset, u32 component_size, u32 vertex_size,
@@ -240,8 +235,8 @@ void FifoRecorder::StartRecording(s32 numFrames, CallbackFunc finishedCb)
   m_Ram.resize(memory.GetRamSize());
   m_ExRam.resize(memory.GetExRamSize());
 
-  std::fill(m_Ram.begin(), m_Ram.end(), 0);
-  std::fill(m_ExRam.begin(), m_ExRam.end(), 0);
+  std::ranges::fill(m_Ram, 0);
+  std::ranges::fill(m_ExRam, 0);
 
   m_File->SetIsWii(m_system.IsWii());
 
@@ -255,8 +250,8 @@ void FifoRecorder::StartRecording(s32 numFrames, CallbackFunc finishedCb)
   m_RequestedRecordingEnd = false;
   m_FinishedCb = finishedCb;
 
-  m_end_of_frame_event = AfterFrameEvent::Register(
-      [this](const Core::System& system) {
+  m_end_of_frame_event =
+      m_system.GetVideoEvents().after_frame_event.Register([this](const Core::System& system) {
         const bool was_recording = OpcodeDecoder::g_record_fifo_data;
         OpcodeDecoder::g_record_fifo_data = IsRecording();
 
@@ -275,8 +270,7 @@ void FifoRecorder::StartRecording(s32 numFrames, CallbackFunc finishedCb)
         const auto& fifo = system.GetCommandProcessor().GetFifo();
         EndFrame(fifo.CPBase.load(std::memory_order_relaxed),
                  fifo.CPEnd.load(std::memory_order_relaxed));
-      },
-      "FifoRecorder::EndFrame");
+      });
 }
 
 void FifoRecorder::RecordInitialVideoMemory()
@@ -382,7 +376,7 @@ void FifoRecorder::UseMemory(u32 address, u32 size, MemoryUpdate::Type type, boo
     memUpdate.fifoPosition = (u32)(m_FifoData.size());
     memUpdate.type = type;
     memUpdate.data.resize(size);
-    std::copy(newData, newData + size, memUpdate.data.begin());
+    std::copy_n(newData, size, memUpdate.data.begin());
 
     m_CurrentFrame.memoryUpdates.push_back(std::move(memUpdate));
   }

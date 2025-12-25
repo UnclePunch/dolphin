@@ -18,6 +18,7 @@ add_library(common
   BitSet.h
   BitUtils.h
   BlockingLoop.h
+  Buffer.h
   ChunkFile.h
   CodeBlock.h
   ColorUtil.cpp
@@ -34,6 +35,7 @@ add_library(common
   Config/Enums.h
   Config/Layer.cpp
   Config/Layer.h
+  Contains.h
   CPUDetect.h
   Crypto/AES.cpp
   Crypto/AES.h
@@ -50,6 +52,8 @@ add_library(common
   Debug/Threads.h
   Debug/Watches.cpp
   Debug/Watches.h
+  DirectIOFile.cpp
+  DirectIOFile.h
   DynamicLibrary.cpp
   DynamicLibrary.h
   ENet.cpp
@@ -62,12 +66,15 @@ add_library(common
   FatFsUtil.h
   FileSearch.cpp
   FileSearch.h
+  FilesystemWatcher.cpp
+  FilesystemWatcher.h
   FileUtil.cpp
   FileUtil.h
   FixedSizeQueue.h
   Flag.h
   FloatUtils.cpp
   FloatUtils.h
+  Functional.h
   FormatUtil.h
   FPURoundMode.h
   GekkoDisassembler.cpp
@@ -75,6 +82,8 @@ add_library(common
   Hash.cpp
   Hash.h
   HookableEvent.h
+  HostDisassembler.cpp
+  HostDisassembler.h
   HttpRequest.cpp
   HttpRequest.h
   Image.cpp
@@ -90,6 +99,7 @@ add_library(common
   JsonUtil.cpp
   Lazy.h
   LinearDiskCache.h
+  UnixUtil.h
   Logging/ConsoleListener.h
   Logging/Log.h
   Logging/LogManager.cpp
@@ -103,14 +113,17 @@ add_library(common
   MinizipUtil.h
   MsgHandler.cpp
   MsgHandler.h
+  Mutex.h
   NandPaths.cpp
   NandPaths.h
   Network.cpp
   Network.h
+  OneShotEvent.h
   PcapFile.cpp
   PcapFile.h
   Profiler.cpp
   Profiler.h
+  Projection.h
   QoSSession.cpp
   QoSSession.h
   Random.cpp
@@ -150,6 +163,7 @@ add_library(common
   VariantUtil.h
   Version.cpp
   Version.h
+  WaitableFlag.h
   WindowSystemInfo.h
   WorkQueueThread.h
 )
@@ -169,16 +183,21 @@ PUBLIC
   enet::enet
   fmt::fmt
   MbedTLS::mbedtls
-  minizip::minizip
+  MINIZIP::minizip-ng
   sfml-network
 
 PRIVATE
   CURL::libcurl
   FatFs
-  Iconv::Iconv
   spng::spng
+  watcher
   ${VTUNE_LIBRARIES}
 )
+
+if ((DEFINED CMAKE_ANDROID_ARCH_ABI AND CMAKE_ANDROID_ARCH_ABI MATCHES "x86|x86_64") OR
+    (NOT DEFINED CMAKE_ANDROID_ARCH_ABI AND _M_X86_64))
+  target_link_libraries(common PRIVATE bdisasm)
+endif()
 
 if (APPLE)
   target_link_libraries(common
@@ -208,8 +227,6 @@ endif()
 
 if(ANDROID)
   target_sources(common PRIVATE
-    AndroidAnalytics.cpp
-    AndroidAnalytics.h
     Logging/ConsoleListenerDroid.cpp
     MemArenaAndroid.cpp
   )
@@ -219,6 +236,11 @@ elseif(WIN32)
     LdrWatcher.h
     Logging/ConsoleListenerWin.cpp
     MemArenaWin.cpp
+  )
+elseif(APPLE)
+  target_sources(common PRIVATE
+    Logging/ConsoleListenerNix.cpp
+    MemArenaDarwin.cpp
   )
 else()
   target_sources(common PRIVATE
@@ -289,6 +311,8 @@ if(WIN32)
     CompatPatches.cpp
     GL/GLInterface/WGL.cpp
     GL/GLInterface/WGL.h
+    WindowsDevice.cpp
+    WindowsDevice.h
     WindowsRegistry.cpp
   )
 elseif(APPLE)
@@ -320,14 +344,34 @@ endif()
 
 if(WIN32)
   target_sources(common PRIVATE HRWrap.h HRWrap.cpp)
+else()
+  target_link_libraries(common PRIVATE Iconv::Iconv)
 endif()
 
 if(USE_UPNP)
   target_link_libraries(common PRIVATE Miniupnpc::miniupnpc)
 endif()
 
-if(OPROFILE_FOUND)
-  target_link_libraries(common PRIVATE OProfile::OProfile)
+if(ENABLE_LLVM)
+  find_package(LLVM CONFIG)
+  if(LLVM_FOUND)
+    message(STATUS "LLVM found, enabling LLVM support in disassembler")
+    target_compile_definitions(common PRIVATE HAVE_LLVM)
+    # Minimal documentation about LLVM's CMake functions is available here:
+    # https://releases.llvm.org/16.0.0/docs/CMake.html#embedding-llvm-in-your-project
+    # https://groups.google.com/g/llvm-dev/c/YeEVe7HTasQ?pli=1
+    #
+    # However, you have to read the source code in any case.
+    # Look for LLVM-Config.cmake in your (Unix) system:
+    # $ find /usr -name LLVM-Config\\.cmake 2>/dev/null
+    llvm_expand_pseudo_components(LLVM_EXPAND_COMPONENTS
+      AllTargetsInfos AllTargetsDisassemblers AllTargetsCodeGens
+    )
+    llvm_config(common USE_SHARED
+      mcdisassembler target ${LLVM_EXPAND_COMPONENTS}
+    )
+    target_include_directories(common PRIVATE ${LLVM_INCLUDE_DIRS})
+  endif()
 endif()
 
 if(UNIX)

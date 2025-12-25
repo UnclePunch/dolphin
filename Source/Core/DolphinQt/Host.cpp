@@ -8,6 +8,7 @@
 #include <QAbstractEventDispatcher>
 #include <QApplication>
 #include <QLocale>
+#include <QThread>
 
 #include <imgui.h>
 
@@ -106,9 +107,9 @@ static void RunWithGPUThreadInactive(std::function<void()> f)
     auto& system = Core::System::GetInstance();
     const bool was_running = Core::GetState(system) == Core::State::Running;
     auto& fifo = system.GetFifo();
-    fifo.PauseAndLock(true, was_running);
+    fifo.PauseAndLock();
     f();
-    fifo.PauseAndLock(false, was_running);
+    fifo.RestoreState(was_running);
   }
   else
   {
@@ -245,7 +246,8 @@ bool Host_TASInputHasFocus()
 
 void Host_YieldToUI()
 {
-  qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
+  if (qApp->thread() == QThread::currentThread())
+    qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 }
 
 void Host_UpdateDisasmDialog()
@@ -256,16 +258,25 @@ void Host_UpdateDisasmDialog()
   QueueOnObject(QApplication::instance(), [] { emit Host::GetInstance()->UpdateDisasmDialog(); });
 }
 
+void Host_JitCacheInvalidation()
+{
+  QueueOnObject(QApplication::instance(), [] { emit Host::GetInstance()->JitCacheInvalidation(); });
+}
+
+void Host_JitProfileDataWiped()
+{
+  QueueOnObject(QApplication::instance(), [] { emit Host::GetInstance()->JitProfileDataWiped(); });
+}
+
 void Host_PPCSymbolsChanged()
 {
   QueueOnObject(QApplication::instance(), [] { emit Host::GetInstance()->PPCSymbolsChanged(); });
 }
 
-// We ignore these, and their purpose should be questioned individually.
-// In particular, RequestRenderWindowSize, RequestFullscreen, and
-// UpdateMainFrame should almost certainly be removed.
-void Host_UpdateMainFrame()
+void Host_PPCBreakpointsChanged()
 {
+  QueueOnObject(QApplication::instance(),
+                [] { emit Host::GetInstance()->PPCBreakpointsChanged(); });
 }
 
 void Host_RequestRenderWindowSize(int w, int h)
@@ -275,11 +286,9 @@ void Host_RequestRenderWindowSize(int w, int h)
 
 bool Host_UIBlocksControllerState()
 {
-  return ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard;
-}
-
-void Host_RefreshDSPDebuggerWindow()
-{
+  // TODO: Remove the Paused check once async presentation is implemented.
+  return ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard &&
+         Core::GetState(Core::System::GetInstance()) != Core::State::Paused;
 }
 
 void Host_TitleChanged()

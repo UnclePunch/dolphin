@@ -10,7 +10,6 @@
 #include <iterator>
 #include <map>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -18,6 +17,7 @@
 #include <vector>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <pugixml.hpp>
 
 #include "Common/BitUtils.h"
@@ -131,6 +131,7 @@ GameFile::GameFile(std::string path) : m_file_path(std::move(path))
       m_internal_name = volume->GetInternalName();
       m_game_id = volume->GetGameID();
       m_gametdb_id = volume->GetGameTDBID();
+      m_triforce_id = volume->GetTriforceID();
       m_title_id = volume->GetTitleID().value_or(0);
       m_maker_id = volume->GetMakerID();
       m_revision = volume->GetRevision().value_or(0);
@@ -311,6 +312,7 @@ void GameFile::DoState(PointerWrap& p)
   p.Do(m_internal_name);
   p.Do(m_game_id);
   p.Do(m_gametdb_id);
+  p.Do(m_triforce_id);
   p.Do(m_title_id);
   p.Do(m_maker_id);
 
@@ -436,7 +438,7 @@ bool GameFile::ReadPNGBanner(const std::string& path)
     return false;
 
   GameBanner& banner = m_pending.custom_banner;
-  std::vector<u8> data_out;
+  Common::UniqueBuffer<u8> data_out;
   if (!Common::LoadPNG(png_data, &data_out, &banner.width, &banner.height))
     return false;
 
@@ -499,7 +501,8 @@ const std::string& GameFile::GetName(const Core::TitleDatabase& title_database) 
   if (IsModDescriptor())
     return GetName(Variant::LongAndPossiblyCustom);
 
-  const std::string& database_name = title_database.GetTitleName(m_gametdb_id, GetConfigLanguage());
+  const std::string& database_name =
+      title_database.GetTitleName(m_gametdb_id, m_triforce_id, GetConfigLanguage());
   return database_name.empty() ? GetName(Variant::LongAndPossiblyCustom) : database_name;
 }
 
@@ -613,11 +616,10 @@ bool GameFile::CheckIfTwoDiscGame(const std::string& game_id) const
       "S6T",
       "SDQ",
   };
-  static_assert(std::is_sorted(two_disc_game_id_prefixes.begin(), two_disc_game_id_prefixes.end()));
+  static_assert(std::ranges::is_sorted(two_disc_game_id_prefixes));
 
   std::string_view game_id_prefix(game_id.data(), GAME_ID_PREFIX_SIZE);
-  return std::binary_search(two_disc_game_id_prefixes.begin(), two_disc_game_id_prefixes.end(),
-                            game_id_prefix);
+  return std::ranges::binary_search(two_disc_game_id_prefixes, game_id_prefix);
 }
 
 std::string GameFile::GetNetPlayName(const Core::TitleDatabase& title_database) const
@@ -643,10 +645,7 @@ std::string GameFile::GetNetPlayName(const Core::TitleDatabase& title_database) 
   }
   if (info.empty())
     return name;
-  std::ostringstream ss;
-  std::copy(info.begin(), info.end() - 1, std::ostream_iterator<std::string>(ss, ", "));
-  ss << info.back();
-  return name + " (" + ss.str() + ")";
+  return fmt::format("{} ({})", name, fmt::join(info, ", "));
 }
 
 static Common::SHA1::Digest GetHash(u32 value)
@@ -841,7 +840,7 @@ std::string GameFile::GetFileFormatName() const
   {
     std::string name = DiscIO::GetName(m_blob_type, true);
     if (m_is_nkit)
-      name = Common::FmtFormatT("{0} (NKit)", name);
+      return Common::FmtFormatT("{0} (NKit)", name);
     return name;
   }
   }

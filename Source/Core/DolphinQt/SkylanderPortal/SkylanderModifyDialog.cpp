@@ -17,7 +17,7 @@
 #include "Core/IOS/USB/Emulated/Skylanders/Skylander.h"
 #include "Core/System.h"
 
-#include "DolphinQt/QtUtils/SetWindowDecorations.h"
+#include "DolphinQt/QtUtils/QtUtils.h"
 
 SkylanderModifyDialog::SkylanderModifyDialog(QWidget* parent, u8 slot)
     : QDialog(parent), m_slot(slot)
@@ -106,8 +106,6 @@ SkylanderModifyDialog::SkylanderModifyDialog(QWidget* parent, u8 slot)
 
   this->setLayout(layout);
 
-  SetQWidgetWindowDecorations(this);
-
   if (should_show)
   {
     this->show();
@@ -168,8 +166,9 @@ void SkylanderModifyDialog::PopulateSkylanderOptions(QVBoxLayout* layout)
   edit_nick->setValidator(
       new QRegularExpressionValidator(QRegularExpression(QStringLiteral("^\\p{L}{0,15}$")), this));
   edit_playtime->setValidator(new QIntValidator(0, INT_MAX, this));
-  edit_last_reset->setDisplayFormat(QStringLiteral("dd/MM/yyyy hh:mm"));
-  edit_last_placed->setDisplayFormat(QStringLiteral("dd/MM/yyyy hh:mm"));
+
+  QtUtils::ShowFourDigitYear(edit_last_reset);
+  QtUtils::ShowFourDigitYear(edit_last_placed);
 
   edit_toy_code->setToolTip(tr("The toy code for this figure. Only available for real figures."));
   edit_money->setToolTip(tr("The amount of money this Skylander has. Between 0 and 65000"));
@@ -211,7 +210,7 @@ void SkylanderModifyDialog::PopulateSkylanderOptions(QVBoxLayout* layout)
   layout->addLayout(hbox_last_reset);
   layout->addLayout(hbox_last_placed);
 
-  connect(m_buttons, &QDialogButtonBox::accepted, this, [=, this]() {
+  connect(m_buttons, &QDialogButtonBox::accepted, this, [=, this] {
     if (!edit_money->hasAcceptableInput())
     {
       QMessageBox::warning(this, tr("Incorrect money value!"),
@@ -324,7 +323,7 @@ bool SkylanderModifyDialog::PopulateTrophyOptions(QVBoxLayout* layout)
     layout->addLayout(hbox);
   }
 
-  connect(m_buttons, &QDialogButtonBox::accepted, this, [=, this]() {
+  connect(m_buttons, &QDialogButtonBox::accepted, this, [=, this] {
     m_figure_data.trophy_data.unlocked_villains = 0x0;
     for (size_t i = 0; i < MAX_VILLAINS; ++i)
       m_figure_data.trophy_data.unlocked_villains |=

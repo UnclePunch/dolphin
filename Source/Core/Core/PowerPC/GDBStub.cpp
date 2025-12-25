@@ -172,12 +172,14 @@ static void RemoveBreakpoint(BreakpointType type, u32 addr, u32 len)
   else
   {
     auto& memchecks = Core::System::GetInstance().GetPowerPC().GetMemChecks();
+    DelayedMemCheckUpdate delayed_update(&memchecks);
     while (memchecks.GetMemCheck(addr, len) != nullptr)
     {
-      memchecks.Remove(addr);
+      delayed_update |= memchecks.Remove(addr);
       INFO_LOG_FMT(GDB_STUB, "gdb: removed a memcheck: {:08x} bytes at {:08x}", len, addr);
     }
   }
+  Host_PPCBreakpointsChanged();
 }
 
 static void Nack()
@@ -258,7 +260,7 @@ static void ReadCommand()
 
 static bool IsDataAvailable()
 {
-  struct timeval t;
+  timeval t;
   fd_set _fds, *fds = &_fds;
 
   FD_ZERO(fds);
@@ -660,7 +662,7 @@ static void WriteRegister()
       break;
     case 65:
       ppc_state.msr.Hex = re32hex(bufptr);
-      PowerPC::MSRUpdated(ppc_state);
+      system.GetPowerPC().MSRUpdated();
       break;
     case 66:
       ppc_state.cr.Set(re32hex(bufptr));
@@ -682,6 +684,7 @@ static void WriteRegister()
       break;
     case 104:
       ppc_state.spr[SPR_SDR] = re32hex(bufptr);
+      system.GetMMU().SDRUpdated();
       break;
     case 105:
       ppc_state.spr[SPR_ASR] = re64hex(bufptr);
@@ -866,7 +869,7 @@ static void Step()
 {
   auto& system = Core::System::GetInstance();
   system.GetCPU().SetStepping(true);
-  Core::CallOnStateChangedCallbacks(Core::State::Paused);
+  Core::NotifyStateChanged(Core::State::Paused);
 }
 
 static bool AddBreakpoint(BreakpointType type, u32 addr, u32 len)
@@ -896,6 +899,7 @@ static bool AddBreakpoint(BreakpointType type, u32 addr, u32 len)
     INFO_LOG_FMT(GDB_STUB, "gdb: added {} memcheck: {:08x} bytes at {:08x}", static_cast<int>(type),
                  len, addr);
   }
+  Host_PPCBreakpointsChanged();
   return true;
 }
 
