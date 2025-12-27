@@ -1,0 +1,242 @@
+// Copyright 2017 Dolphin Emulator Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+#include "Core/HW/EXI/EXI_Starpole.h"
+
+#include <string>
+
+#include "Common/CommonTypes.h"
+#include "Common/Logging/Log.h"
+
+#include "Core/HW/Memmap.h"   // needed to write directly to game memory using DMA
+#include "Core/System.h"      // needed to write directly to game memory using DMA
+
+#include "Common/FileUtil.h"  // testing sending strings to game
+
+#define TEST_FILE "match_stream.bin"
+
+namespace ExpansionInterface
+{
+CEXIStarpole::CEXIStarpole(Core::System& system, const std::string& name)
+    : IEXIDevice(system), m_name{name}
+{
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE INIT");
+}
+
+void CEXIStarpole::ImmWrite(u32 data, u32 size)
+{
+  // INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE ImmWrite: data {:08x} size {}", data, size);
+
+  // receive an Imm transfer from the game
+  cur_cmd = (StarpoleCmd)(data & 0xFFFF); // remember which data the game is requesting
+  cur_args = (data & 0xFFFF0000) >> 16;   // pull out args
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE Imm Received cmd {} args {}", (u32)cur_cmd, cur_args);
+}
+
+u32 CEXIStarpole::ImmRead(u32 size)
+{
+  int response;
+
+  // respond with the appropriate data
+  switch (cur_cmd)
+  {
+  case STARPOLE_CMD_ID:
+    response = STARPOLE_DEVICE_ID;          // id for Starpole
+    cur_cmd = STARPOLE_CMD_NUM;             // no follow up DMA, null cur_cmd
+    break;
+
+  case STARPOLE_CMD_TEST:
+    response = sizeof(StarpoleDataTest);    // size of follow-up DMA response
+    break;
+
+  case STARPOLE_CMD_REQMATCH:
+    response = Match_Prepare();
+    break;
+
+  case STARPOLE_CMD_END:
+    Receive_End();
+    response = 0;
+    cur_cmd = STARPOLE_CMD_NUM;             // no follow up DMA, null cur_cmd
+    break;
+
+  default:
+    response = 0;
+  }
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE Imm Response {:08x}", response);
+
+  return response;
+}
+
+void CEXIStarpole::DMAWrite(u32 address, u32 size)
+{
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE DMA Receive: {:08x} bytes, from {:08x} to EXI device",
+               size, address);
+
+  // get pointer to address we will read from
+  u8* read_ptr = m_system.GetMemory().GetPointerForRange(address, size);
+
+  // receive the data
+  switch (cur_cmd)
+  {
+  case STARPOLE_CMD_MATCH:
+    Receive_Match(read_ptr, size);
+    break;
+  case STARPOLE_CMD_FRAME:
+    Receive_Frame(read_ptr, size);
+    break;
+  default:
+    ERROR_LOG_FMT(EXPANSIONINTERFACE, "DMA Receive not handled!");
+    break;
+  }
+
+  cur_cmd = STARPOLE_CMD_NUM;  // data has been written to memory, end the current command operation
+}
+
+void CEXIStarpole::DMARead(u32 address, u32 size)
+{
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE DMA Response: {:08x} bytes, from EXI device to {:08x}",
+               size, address);
+
+  // get pointer to address we will write to
+  u8* write_ptr = m_system.GetMemory().GetPointerForRange(address, size);
+
+  // perform the current command's operation
+  switch (cur_cmd)
+  {
+  case STARPOLE_CMD_TEST:
+    File::GetUserPath(D_CONFIG_IDX).copy((char *)write_ptr, sizeof(StarpoleDataTest), 0);
+    break;
+  case STARPOLE_CMD_REQMATCH:
+    Send_Match(write_ptr);
+    break;
+  case STARPOLE_CMD_REQFRAME:
+    Send_Frame(write_ptr, cur_args);
+    break;
+  default:
+    ERROR_LOG_FMT(EXPANSIONINTERFACE, "DMA Reponse not handled!");
+    break;
+  }
+
+  cur_cmd = STARPOLE_CMD_NUM;   // data has been written to memory, end the current command operation
+}
+
+bool CEXIStarpole::IsPresent() const
+{
+  return true;
+}
+
+void CEXIStarpole::TransferByte(u8& byte)
+{
+}
+
+void CEXIStarpole::Receive_Match(u8 *read_ptr, u32 size)
+{
+  memcpy((void*)&in_match_data, read_ptr, size);
+
+  int active_ply_num = 0;
+  for (int i = 0; i < 4; i++)
+  {
+    if (in_match_data.ply_desc[i].p_kind != 4)
+      active_ply_num++;
+  }
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Received {}p match being played on gr_kind {}. RNG Seed: {:08x}", active_ply_num,
+               in_match_data.gr_kind.ToHost(), in_match_data.rng_seed.ToHost());
+
+  // create a file
+  CreateFile(TEST_FILE);
+  WriteFile((uint8_t*)&in_match_data, size);
+}
+void CEXIStarpole::Receive_Frame(u8* read_ptr, u32 size)
+{
+  StarpoleDataFrame frame;
+
+  memcpy((void*)&frame, read_ptr, size);
+
+  WriteFile((uint8_t*)&frame, size);
+  // CloseFile();
+
+  // Header
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Frame {}: RNG Seed: {:08x}, Player Count: {}",
+               frame.frame_idx.ToHost(), frame.rng_seed.ToHost(), frame.ply_num.ToHost());
+
+  const u32 ply_count = std::min<u32>(frame.ply_num.ToHost(), 4);
+
+  // Per-player data
+  for (u32 i = 0; i < ply_count; i++)
+  {
+    const auto& ply = frame.ply[i];
+
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "Ply {}", ply.idx.ToHost());
+
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "  Machine: {} | State: {}", ply.machine_kind.ToHost(),
+                 ply.rd_state.ToHost());
+
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "  Pos : ({:.3f}, {:.3f}, {:.3f})", ply.pos.x.ToHost(),
+                 ply.pos.y.ToHost(), ply.pos.z.ToHost());
+
+    INFO_LOG_FMT(EXPANSIONINTERFACE,
+                 "  Inputs: LStick({:.3f}, {:.3f}) RStick({:.3f}, {:.3f}) Buttons: {:08x}",
+                 ply.input.lstick.x.ToHost(), ply.input.lstick.y.ToHost(),
+                 ply.input.rstick.x.ToHost(), ply.input.rstick.y.ToHost(),
+                 ply.input.buttons.ToHost());
+
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "");
+
+  }
+
+}
+void CEXIStarpole::Receive_End()
+{
+  int terminator = -1;
+  WriteFile((uint8_t*)&terminator, sizeof(terminator));
+  CloseFile();
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Match End!");
+
+}
+
+int CEXIStarpole::Match_Prepare()
+{
+  try
+  {
+    OpenFile(TEST_FILE);
+    return 1;
+  }
+  catch (const std::exception& e)
+  {
+    ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to open file: {}", e.what());
+    return 0;
+  }
+}
+void CEXIStarpole::Send_Match(u8* write_ptr)
+{
+  // read match data
+  StarpoleDataMatch match;
+  ReadFileOffset((uint8_t *)&match, 0, sizeof(match));
+
+  // write to game memory
+  memcpy(write_ptr, (void*)&match, sizeof(match));
+
+  frame_idx = 0;
+}
+void CEXIStarpole::Send_Frame(u8* write_ptr, u32 index)
+{
+  // read match data
+  StarpoleDataMatch frame;
+  int offset = sizeof(StarpoleDataMatch) + index * sizeof(StarpoleDataFrame);
+  ReadFileOffset((uint8_t*)&frame, offset, sizeof(StarpoleDataFrame));
+  
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Read file offset 0x{:X}", offset);
+
+  // write to game memory
+  memcpy(write_ptr, (void*)&frame, sizeof(frame));
+
+  frame_idx++;
+}
+
+}  // namespace ExpansionInterface
+
