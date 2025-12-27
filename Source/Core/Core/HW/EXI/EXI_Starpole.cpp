@@ -13,13 +13,15 @@
 
 #include "Common/FileUtil.h"  // testing sending strings to game
 
-#define TEST_FILE "match_stream.bin"
+#define TEST_FILE "replay.krf"
 
 namespace ExpansionInterface
 {
 CEXIStarpole::CEXIStarpole(Core::System& system, const std::string& name)
     : IEXIDevice(system), m_name{name}
 {
+  replay_state = STARPOLE_REPLAYSTATE_NONE;
+
   INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE INIT");
 }
 
@@ -55,7 +57,7 @@ u32 CEXIStarpole::ImmRead(u32 size)
     break;
 
   case STARPOLE_CMD_END:
-    Receive_End();
+    End_Receive();
     response = 0;
     cur_cmd = STARPOLE_CMD_NUM;             // no follow up DMA, null cur_cmd
     break;
@@ -82,10 +84,10 @@ void CEXIStarpole::DMAWrite(u32 address, u32 size)
   switch (cur_cmd)
   {
   case STARPOLE_CMD_MATCH:
-    Receive_Match(read_ptr, size);
+    Match_Receive(read_ptr, size);
     break;
   case STARPOLE_CMD_FRAME:
-    Receive_Frame(read_ptr, size);
+    Frame_Receive(read_ptr, size);
     break;
   default:
     ERROR_LOG_FMT(EXPANSIONINTERFACE, "DMA Receive not handled!");
@@ -110,10 +112,10 @@ void CEXIStarpole::DMARead(u32 address, u32 size)
     File::GetUserPath(D_CONFIG_IDX).copy((char *)write_ptr, sizeof(StarpoleDataTest), 0);
     break;
   case STARPOLE_CMD_REQMATCH:
-    Send_Match(write_ptr);
+    Match_Send(write_ptr);
     break;
   case STARPOLE_CMD_REQFRAME:
-    Send_Frame(write_ptr, cur_args);
+    Frame_Send(write_ptr, cur_args);
     break;
   default:
     ERROR_LOG_FMT(EXPANSIONINTERFACE, "DMA Reponse not handled!");
@@ -132,73 +134,77 @@ void CEXIStarpole::TransferByte(u8& byte)
 {
 }
 
-void CEXIStarpole::Receive_Match(u8 *read_ptr, u32 size)
+// Recording
+void CEXIStarpole::Match_Receive(u8 *read_ptr, u32 size)
 {
-  memcpy((void*)&in_match_data, read_ptr, size);
+  memcpy((void*)&match_data, read_ptr, size);
 
   int active_ply_num = 0;
   for (int i = 0; i < 4; i++)
   {
-    if (in_match_data.ply_desc[i].p_kind != 4)
+    if (match_data.ply_desc[i].p_kind != 4)
       active_ply_num++;
   }
 
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "Received {}p match being played on gr_kind {}. RNG Seed: {:08x}", active_ply_num,
-               in_match_data.gr_kind.ToHost(), in_match_data.rng_seed.ToHost());
+  INFO_LOG_FMT(EXPANSIONINTERFACE,
+               "Received {}p match being played on gr_kind {} with stadium {}. RNG Seed: {:08x}",
+               active_ply_num, match_data.misc[0x3], match_data.stadium_kind.ToHost(),
+               match_data.rng_seed.ToHost());
 
   // create a file
   CreateFile(TEST_FILE);
-  WriteFile((uint8_t*)&in_match_data, size);
+  WriteFile((uint8_t*)&match_data, size);
+  replay_state = STARPOLE_REPLAYSTATE_RECORD;
 }
-void CEXIStarpole::Receive_Frame(u8* read_ptr, u32 size)
+void CEXIStarpole::Frame_Receive(u8* read_ptr, u32 size)
 {
   StarpoleDataFrame frame;
 
   memcpy((void*)&frame, read_ptr, size);
 
   WriteFile((uint8_t*)&frame, size);
-  // CloseFile();
 
   // Header
   INFO_LOG_FMT(EXPANSIONINTERFACE, "Frame {}: RNG Seed: {:08x}, Player Count: {}",
-               frame.frame_idx.ToHost(), frame.rng_seed.ToHost(), frame.ply_num.ToHost());
+               frame.frame_idx.ToHost(), frame.rng_seed.ToHost(), frame.ply_num);
 
-  const u32 ply_count = std::min<u32>(frame.ply_num.ToHost(), 4);
+  const u32 ply_count = std::min<u32>(frame.ply_num, 4);
 
   // Per-player data
   for (u32 i = 0; i < ply_count; i++)
   {
     const auto& ply = frame.ply[i];
 
-    INFO_LOG_FMT(EXPANSIONINTERFACE, "Ply {}", ply.idx.ToHost());
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "Ply {}", ply.idx);
 
-    INFO_LOG_FMT(EXPANSIONINTERFACE, "  Machine: {} | State: {}", ply.machine_kind.ToHost(),
-                 ply.rd_state.ToHost());
+    //INFO_LOG_FMT(EXPANSIONINTERFACE, "  Machine: {} | State: {}", ply.machine_kind.ToHost(),
+    //             ply.rd_state.ToHost());
 
-    INFO_LOG_FMT(EXPANSIONINTERFACE, "  Pos : ({:.3f}, {:.3f}, {:.3f})", ply.pos.x.ToHost(),
-                 ply.pos.y.ToHost(), ply.pos.z.ToHost());
+    //INFO_LOG_FMT(EXPANSIONINTERFACE, "  Pos : ({:.3f}, {:.3f}, {:.3f})", ply.pos.x.ToHost(),
+    //             ply.pos.y.ToHost(), ply.pos.z.ToHost());
 
     INFO_LOG_FMT(EXPANSIONINTERFACE,
-                 "  Inputs: LStick({:.3f}, {:.3f}) RStick({:.3f}, {:.3f}) Buttons: {:08x}",
-                 ply.input.lstick.x.ToHost(), ply.input.lstick.y.ToHost(),
-                 ply.input.rstick.x.ToHost(), ply.input.rstick.y.ToHost(),
-                 ply.input.buttons.ToHost());
+                 "  Inputs: LStick({}, {}) RStick({}, {}) Buttons: {:08x}",
+                 ply.input.stickX, ply.input.stickY,
+                 ply.input.substickX, ply.input.substickY,
+                 (int)ply.input.down << 4);
 
     INFO_LOG_FMT(EXPANSIONINTERFACE, "");
 
   }
 
 }
-void CEXIStarpole::Receive_End()
+void CEXIStarpole::End_Receive()
 {
   int terminator = -1;
   WriteFile((uint8_t*)&terminator, sizeof(terminator));
   CloseFile();
 
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "Match End!");
 
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Match end.");
 }
 
+// Playback
 int CEXIStarpole::Match_Prepare()
 {
   try
@@ -212,22 +218,23 @@ int CEXIStarpole::Match_Prepare()
     return 0;
   }
 }
-void CEXIStarpole::Send_Match(u8* write_ptr)
+void CEXIStarpole::Match_Send(u8* write_ptr)
 {
   // read match data
-  StarpoleDataMatch match;
-  ReadFileOffset((uint8_t *)&match, 0, sizeof(match));
+  ReadFileOffset((uint8_t*)&match_data, 0, sizeof(match_data));
 
   // write to game memory
-  memcpy(write_ptr, (void*)&match, sizeof(match));
+  memcpy(write_ptr, (void*)&match_data, sizeof(match_data));
 
   frame_idx = 0;
+  replay_state = STARPOLE_REPLAYSTATE_PLAYBACK;
 }
-void CEXIStarpole::Send_Frame(u8* write_ptr, u32 index)
+void CEXIStarpole::Frame_Send(u8* write_ptr, u32 index)
 {
   // read match data
   StarpoleDataMatch frame;
-  int offset = sizeof(StarpoleDataMatch) + index * sizeof(StarpoleDataFrame);
+
+  int offset = sizeof(StarpoleDataMatch) + index * match_data.frame_size.ToHost();
   ReadFileOffset((uint8_t*)&frame, offset, sizeof(StarpoleDataFrame));
   
   INFO_LOG_FMT(EXPANSIONINTERFACE, "Read file offset 0x{:X}", offset);

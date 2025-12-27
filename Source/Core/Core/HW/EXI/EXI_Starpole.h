@@ -59,6 +59,28 @@ struct be_s32
 #endif
   }
 };
+struct be_u16
+{
+  u16 val;  // stored big-endian
+
+  u16 ToHost() const
+  {
+#if defined(_MSC_VER)
+    return _byteswap_ushort(val);
+#else
+    return __builtin_bswap16(val);
+#endif
+  }
+
+  void FromHost(u16 v)
+  {
+#if defined(_MSC_VER)
+    val = _byteswap_ushort(v);
+#else
+    val = __builtin_bswap16(v);
+#endif
+  }
+};
 struct be_float
 {
   u32 be;  // stored big-endian
@@ -120,6 +142,13 @@ typedef enum
   STARPOLE_CMD_NUM,
 } StarpoleCmd;
 
+typedef enum
+{
+  STARPOLE_REPLAYSTATE_NONE,
+  STARPOLE_REPLAYSTATE_RECORD,
+  STARPOLE_REPLAYSTATE_PLAYBACK,
+} StarpoleReplayState;
+
 // payload structures
 typedef struct
 {
@@ -128,7 +157,9 @@ typedef struct
 typedef struct
 {
   be_u32 rng_seed;
-  be_u32 gr_kind;
+  be_u16 frame_size;
+  be_u16 stadium_kind;
+  char misc[0x30];
   struct
   {
     u8 p_kind;        // 0x00
@@ -151,25 +182,30 @@ typedef struct
     int x2c;          // 0x2c
   }ply_desc[4];
 } StarpoleDataMatch;
+
+#pragma pack(push, 1)
 typedef struct
 {
   be_u32 frame_idx;
   be_u32 rng_seed;
-  be_u32 ply_num;
+  u8 ply_num;
   struct
   {
-    be_u32 idx;
+    u8 idx;
     struct
     {
-      be_vec2 lstick;
-      be_vec2 rstick;
-      be_u32 buttons;
+      u8 down;
+      s8 stickX;
+      s8 stickY;
+      s8 substickX;
+      s8 substickY;
     } input;
-    be_u32 rd_state;
-    be_s32 machine_kind;
-    be_vec3 pos;
+    //be_u32 rd_state;
+    //be_s32 machine_kind;
+    //be_vec3 pos;
   } ply[4];
 } StarpoleDataFrame;
+#pragma pack(pop)
 
 // file write/read. dolphin probably already has similar classes i can leverage...
 class StreamWriter
@@ -269,24 +305,27 @@ public:
 private:
   void TransferByte(u8& byte) override;
 
-  void Receive_Match(u8* read_ptr, u32 size);
-  void Receive_Frame(u8* read_ptr, u32 size);
-  void Receive_End();
+  // Recroding
+  void Match_Receive(u8* read_ptr, u32 size);
+  void Frame_Receive(u8* read_ptr, u32 size);
+  void End_Receive();
 
+  // Playback
   int Match_Prepare();
-  void Send_Match(u8* write_ptr);
-  void Send_Frame(u8* write_ptr, u32 index);
+  void Match_Send(u8* write_ptr);
+  void Frame_Send(u8* write_ptr, u32 index);
 
   std::string m_name;
 
   StarpoleCmd cur_cmd = STARPOLE_CMD_NUM;  // current operation being carried out
   u32         cur_args = 0;
 
-  u32 frame_idx;                           // used to sequentially send game frames
-  StarpoleDataMatch in_match_data;
+  StarpoleDataMatch     match_data;   
+  u32                   frame_idx;       // used to sequentially send game frames
+  StarpoleReplayState   replay_state;
 
   // file
-  std::unique_ptr<StreamWriter> writer = 0;
-  std::unique_ptr<StreamReader> reader = 0;
+  std::unique_ptr<StreamWriter> writer;
+  std::unique_ptr<StreamReader> reader;
 };
 }  // namespace ExpansionInterface
