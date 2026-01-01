@@ -11,9 +11,9 @@
 #include "Core/HW/Memmap.h"   // needed to write directly to game memory using DMA
 #include "Core/System.h"      // needed to write directly to game memory using DMA
 
-#include "Common/FileUtil.h"  // testing sending strings to game
-
-#define TEST_FILE "replay.krf"
+#include "Common/FileUtil.h"      // needed to access user directory
+#include <filesystem>
+#include <iostream>
 
 namespace ExpansionInterface
 {
@@ -109,7 +109,7 @@ void CEXIStarpole::DMARead(u32 address, u32 size)
   switch (cur_cmd)
   {
   case STARPOLE_CMD_TEST:
-    File::GetUserPath(D_CONFIG_IDX).copy((char *)write_ptr, sizeof(StarpoleDataTest), 0);
+    File::GetUserPath(D_KAR_REPLAY_IDX).copy((char *)write_ptr, sizeof(StarpoleDataTest), 0);
     break;
   case STARPOLE_CMD_REQMATCH:
     Match_Send(write_ptr);
@@ -152,7 +152,8 @@ void CEXIStarpole::Match_Receive(u8 *read_ptr, u32 size)
                match_data.rng_seed.ToHost());
 
   // create a file
-  CreateFile(TEST_FILE);
+  recent_file = GenerateReplayFilename();
+  CreateFile(recent_file);
   WriteFile((uint8_t*)&match_data, size);
   replay_state = STARPOLE_REPLAYSTATE_RECORD;
 }
@@ -209,7 +210,7 @@ int CEXIStarpole::Match_Prepare()
 {
   try
   {
-    OpenFile(TEST_FILE);
+    OpenFile(recent_file);
     return 1;
   }
   catch (const std::exception& e)
@@ -225,6 +226,8 @@ void CEXIStarpole::Match_Send(u8* write_ptr)
 
   // write to game memory
   memcpy(write_ptr, (void*)&match_data, sizeof(match_data));
+  
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Frame Size 0x{:X}", match_data.frame_size.ToHost());
 
   frame_idx = 0;
   replay_state = STARPOLE_REPLAYSTATE_PLAYBACK;
@@ -243,6 +246,23 @@ void CEXIStarpole::Frame_Send(u8* write_ptr, u32 index)
   memcpy(write_ptr, (void*)&frame, sizeof(frame));
 
   frame_idx++;
+}
+
+std::string CEXIStarpole::GenerateReplayFilename()
+{
+  using namespace std::chrono;
+
+  auto now = system_clock::now();
+  std::time_t t = system_clock::to_time_t(now);
+  std::tm tm{};
+  localtime_s(&tm, &t);  // use localtime_r on POSIX
+
+  std::ostringstream ss;
+  ss << File::GetUserPath(D_KAR_REPLAY_IDX) << "replay_"
+     << std::put_time(&tm, "%Y%m%d_%H%M%S")
+     << ".krf";
+
+  return ss.str();
 }
 
 }  // namespace ExpansionInterface

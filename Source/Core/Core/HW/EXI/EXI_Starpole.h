@@ -302,6 +302,8 @@ public:
   void ReadFile(uint8_t* buffer, u32 size) { reader->ReadChunk(buffer, size); }
   void ReadFileOffset(uint8_t* buffer, u32 offset, u32 size) { reader->ReadChunkOffset(buffer, offset, size); }
 
+  std::string GenerateReplayFilename();
+
 private:
   void TransferByte(u8& byte) override;
 
@@ -327,5 +329,6 @@ private:
   // file
   std::unique_ptr<StreamWriter> writer;
   std::unique_ptr<StreamReader> reader;
+  std::string recent_file;
 };
 }  // namespace ExpansionInterface
