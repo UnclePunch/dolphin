@@ -27,6 +27,7 @@ public:
   ~RiivolutionBootWidget() override;
 
   bool ShouldBoot() const { return m_should_boot; }
+  void IncludePatches();
   std::vector<DiscIO::Riivolution::Patch>& GetPatches() { return m_patches; }
 
 #ifdef USE_RETRO_ACHIEVEMENTS

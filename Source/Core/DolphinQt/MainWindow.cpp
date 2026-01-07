@@ -1157,6 +1157,22 @@ void MainWindow::StartGame(std::unique_ptr<BootParameters>&& parameters)
   // We need the render widget before booting.
   ShowRenderWidget();
 
+  // Apply riivolution patches
+  if (parameters->riivolution_patches.size() == 0)
+  {
+    auto& disc = std::get<BootParameters::Disc>(parameters->parameters);
+    UICommon::GameFile game(disc.path);
+
+    // i am very well aware how insane instantiating a widget is just to create a set of riivolution
+    // patches but the code to do so is very intertwined in the widget source file so i did this to
+    // save a lot of time
+    RiivolutionBootWidget w(disc.volume->GetGameID(), disc.volume->GetRevision(),
+                            disc.volume->GetDiscNumber(), game.GetFilePath(), this);
+    w.IncludePatches();
+     AddRiivolutionPatches(parameters.get(), std::move(w.GetPatches()));
+  }
+
+
   // Boot up, show an error if it fails to load the game.
   if (!BootManager::BootCore(m_system, std::move(parameters),
                              ::GetWindowSystemInfo(m_render_widget->windowHandle())))

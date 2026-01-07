@@ -280,11 +280,8 @@ void RiivolutionBootWidget::SaveConfigXMLs()
   }
 }
 
-void RiivolutionBootWidget::BootGame()
+void RiivolutionBootWidget::IncludePatches()
 {
-  SaveConfigXMLs();
-
-  m_patches.clear();
   for (const auto& disc : m_discs)
   {
     auto patches = disc.disc.GeneratePatches(m_game_id);
@@ -298,6 +295,13 @@ void RiivolutionBootWidget::BootGame()
 
     m_patches.insert(m_patches.end(), patches.begin(), patches.end());
   }
+}
+
+void RiivolutionBootWidget::BootGame()
+{
+  SaveConfigXMLs();
+  m_patches.clear();
+  IncludePatches();
 
   m_should_boot = true;
   close();
