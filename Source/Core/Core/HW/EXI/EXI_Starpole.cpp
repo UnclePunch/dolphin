@@ -8,12 +8,9 @@
 #include "Common/CommonTypes.h"
 #include "Common/Logging/Log.h"
 
-#include "Core/HW/Memmap.h"   // needed to write directly to game memory using DMA
-#include "Core/System.h"      // needed to write directly to game memory using DMA
-
-#include "Common/FileUtil.h"      // needed to access user directory
-#include <filesystem>
-#include <iostream>
+#include "Core/HW/Memmap.h"     // needed to write directly to game memory using DMA
+#include "Core/System.h"        // needed to write directly to game memory using DMA
+#include "Core/NetPlayProto.h"  // needed to get netplay player index
 
 namespace ExpansionInterface
 {
@@ -56,10 +53,19 @@ u32 CEXIStarpole::ImmRead(u32 size)
     response = Match_Prepare();
     break;
 
+  case STARPOLE_CMD_REQFRAME:
+    response = Frame_Prepare(cur_args);
+    break;
+
   case STARPOLE_CMD_END:
     End_Receive();
     response = 0;
     cur_cmd = STARPOLE_CMD_NUM;             // no follow up DMA, null cur_cmd
+    break;
+
+    case STARPOLE_CMD_NETPLAY:
+    response = GetLocalNetplayIndex();
+    cur_cmd = STARPOLE_CMD_NUM;  // no follow up DMA, null cur_cmd
     break;
 
   default:
@@ -148,12 +154,11 @@ void CEXIStarpole::Match_Receive(u8 *read_ptr, u32 size)
 
   INFO_LOG_FMT(EXPANSIONINTERFACE,
                "Received {}p match being played on gr_kind {} with stadium {}. RNG Seed: {:08x}",
-               active_ply_num, match_data.misc[0x3], match_data.stadium_kind.ToHost(),
+               active_ply_num, match_data.stage_kind.ToHost(), match_data.stadium_kind,
                match_data.rng_seed.ToHost());
 
   // create a file
-  recent_file = GenerateReplayFilename();
-  CreateFile(recent_file);
+  CreateFile(GenerateReplayFilename());
   WriteFile((uint8_t*)&match_data, size);
   replay_state = STARPOLE_REPLAYSTATE_RECORD;
 }
@@ -208,14 +213,19 @@ void CEXIStarpole::End_Receive()
 // Playback
 int CEXIStarpole::Match_Prepare()
 {
+  std::ifstream in(recent_file_path);       // load txt
+  std::string last_replay_filename;
+  std::getline(in, last_replay_filename);   // get replay filename from txt
+  in.close();
+
   try
   {
-    OpenFile(recent_file);
+    OpenFile(File::GetUserPath(D_KAR_REPLAY_IDX) + last_replay_filename);
     return 1;
   }
   catch (const std::exception& e)
   {
-    ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to open file: {}", e.what());
+    ERROR_LOG_FMT(EXPANSIONINTERFACE, "{}", e.what());
     return 0;
   }
 }
@@ -232,15 +242,32 @@ void CEXIStarpole::Match_Send(u8* write_ptr)
   frame_idx = 0;
   replay_state = STARPOLE_REPLAYSTATE_PLAYBACK;
 }
+int CEXIStarpole::Frame_Prepare(int index)
+{
+  int frame_size = match_data.frame_size.ToHost();
+  int offset = sizeof(StarpoleDataMatch) + index * frame_size;
+  int file_size = ReadFileSize();
+
+  if (offset + frame_size > file_size)
+    return 0;
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE,
+               "Frame {} from 0x{:08X} to 0x{:08X} exists within the {:08X} file", index, offset,
+               offset + frame_size, file_size);
+
+  return 1;
+}
 void CEXIStarpole::Frame_Send(u8* write_ptr, u32 index)
 {
   // read match data
   StarpoleDataMatch frame;
 
   int offset = sizeof(StarpoleDataMatch) + index * match_data.frame_size.ToHost();
-  ReadFileOffset((uint8_t*)&frame, offset, sizeof(StarpoleDataFrame));
+  int frame_size = match_data.frame_size.ToHost();
+
+  // INFO_LOG_FMT(EXPANSIONINTERFACE, "Reading file offset 0x{:X} with size 0x{:X}", offset, frame_size);
+  ReadFileOffset((uint8_t*)&frame, offset, frame_size);
   
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "Read file offset 0x{:X}", offset);
 
   // write to game memory
   memcpy(write_ptr, (void*)&frame, sizeof(frame));
@@ -255,14 +282,35 @@ std::string CEXIStarpole::GenerateReplayFilename()
   auto now = system_clock::now();
   std::time_t t = system_clock::to_time_t(now);
   std::tm tm{};
-  localtime_s(&tm, &t);  // use localtime_r on POSIX
+  localtime_s(&tm, &t);  // must use localtime_r on POSIX
 
-  std::ostringstream ss;
-  ss << File::GetUserPath(D_KAR_REPLAY_IDX) << "replay_"
+  // generate unique filename based on current time and date
+  std::ostringstream filename;
+  filename << "replay_"
      << std::put_time(&tm, "%Y%m%d_%H%M%S")
      << ".krf";
 
-  return ss.str();
+  // remember last created replay
+  std::ofstream out(recent_file_path);
+  out << filename.str() << '\n';
+  out.close();
+
+  return File::GetUserPath(D_KAR_REPLAY_IDX) + filename.str();
+}
+
+int CEXIStarpole::GetLocalNetplayIndex()
+{
+  if (!NetPlay::IsNetPlayRunning())
+    return -1;
+
+  for (int i = 0; i < 4; i++)
+  {
+    NetPlay::PadDetails pad = NetPlay::GetPadDetails(i);
+    if (pad.is_local)
+      return i;
+  }
+
+  return -1;
 }
 
 }  // namespace ExpansionInterface

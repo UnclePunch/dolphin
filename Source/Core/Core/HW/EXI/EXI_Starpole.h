@@ -12,6 +12,10 @@
 #include <cstdint>
 #include <fstream>
 
+#include "Common/FileUtil.h"      // needed to access user directory
+#include <filesystem>
+#include <iostream>
+
 #define STARPOLE_DEVICE_ID 0x0A000000
 
 // big endian conversion
@@ -138,6 +142,9 @@ typedef enum
   STARPOLE_CMD_REQMATCH,
   STARPOLE_CMD_REQFRAME,
 
+  // netplay
+  STARPOLE_CMD_NETPLAY,
+
   // end
   STARPOLE_CMD_NUM,
 } StarpoleCmd;
@@ -158,8 +165,18 @@ typedef struct
 {
   be_u32 rng_seed;
   be_u16 frame_size;
-  be_u16 stadium_kind;
-  char misc[0x30];
+  be_u16 stage_kind;
+  char stadium_kind;
+  //char city_kind;
+  //be_u16 time_seconds;
+  //u8 tempo;
+  char misc[0xac4 - 0xa94];
+  struct
+  {
+    s8 ply_stats[5][9];
+    u8 is_bike[5];
+    u8 machine_kind[5];
+  } stadium;
   struct
   {
     u8 p_kind;        // 0x00
@@ -194,11 +211,12 @@ typedef struct
     u8 idx;
     struct
     {
-      u8 down;
+      u16 down;
       s8 stickX;
       s8 stickY;
       s8 substickX;
       s8 substickY;
+      u8 trigger;
     } input;
     //be_u32 rd_state;
     //be_s32 machine_kind;
@@ -265,7 +283,7 @@ public:
       throw std::runtime_error("Failed to read chunk");
   }
 
-void ReadChunkOffset(uint8_t* buffer, std::streampos offset, size_t size)
+  void ReadChunkOffset(uint8_t* buffer, std::streampos offset, size_t size)
   {
     file.seekg(offset);
     if (!file)
@@ -273,6 +291,12 @@ void ReadChunkOffset(uint8_t* buffer, std::streampos offset, size_t size)
 
     if (!file.read(reinterpret_cast<char*>(buffer), size))
       throw std::runtime_error("Failed to read bytes");
+  }
+
+  std::streamsize GetFileSize()
+  {
+    file.seekg(0, std::ios::end);
+    return file.tellg();
   }
 
 private:
@@ -301,8 +325,10 @@ public:
   void OpenFile(const std::string& path) { reader = std::make_unique<StreamReader>(path); }
   void ReadFile(uint8_t* buffer, u32 size) { reader->ReadChunk(buffer, size); }
   void ReadFileOffset(uint8_t* buffer, u32 offset, u32 size) { reader->ReadChunkOffset(buffer, offset, size); }
+  std::streamsize ReadFileSize() { return reader->GetFileSize(); }
 
   std::string GenerateReplayFilename();
+  int GetLocalNetplayIndex();
 
 private:
   void TransferByte(u8& byte) override;
@@ -315,6 +341,7 @@ private:
   // Playback
   int Match_Prepare();
   void Match_Send(u8* write_ptr);
+  int Frame_Prepare(int index);
   void Frame_Send(u8* write_ptr, u32 index);
 
   std::string m_name;
@@ -329,6 +356,6 @@ private:
   // file
   std::unique_ptr<StreamWriter> writer;
   std::unique_ptr<StreamReader> reader;
-  std::string recent_file;
+  std::string recent_file_path = File::GetUserPath(D_KAR_REPLAY_IDX) + "replay.txt";
 };
 }  // namespace ExpansionInterface
