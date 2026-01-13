@@ -12,6 +12,7 @@
 #include "DiscIO/Enums.h"
 #include "DiscIO/Volume.h"
 
+#include "DolphinQt/RiivolutionBootWidget.h"
 #include "DolphinQt/Config/ARCodeWidget.h"
 #include "DolphinQt/Config/FilesystemWidget.h"
 #include "DolphinQt/Config/GameConfigWidget.h"
@@ -39,6 +40,7 @@ PropertiesDialog::PropertiesDialog(QWidget* parent, const UICommon::GameFile& ga
   auto* const patches = new PatchesWidget(game);
   auto* const game_config = new GameConfigWidget(game);
   auto* const graphics_mod_list = new GraphicsModListWidget(game);
+  auto* const riivolution = new RiivolutionBootWidget(game, this);
 
   connect(gecko, &GeckoCodeWidget::OpenGeneralSettings, this,
           &PropertiesDialog::OpenGeneralSettings);
@@ -51,6 +53,8 @@ PropertiesDialog::PropertiesDialog(QWidget* parent, const UICommon::GameFile& ga
           &PropertiesDialog::OpenAchievementSettings);
   connect(patches, &PatchesWidget::OpenAchievementSettings, this,
           &PropertiesDialog::OpenAchievementSettings);
+  connect(riivolution, &RiivolutionBootWidget::OpenAchievementSettings, this,
+          &PropertiesDialog::OpenAchievementSettings);
 #endif  // USE_RETRO_ACHIEVEMENTS
 
   connect(graphics_mod_list, &GraphicsModListWidget::OpenGraphicsSettings, this,
@@ -62,6 +66,7 @@ PropertiesDialog::PropertiesDialog(QWidget* parent, const UICommon::GameFile& ga
   AddPane(patches, tr("Patches"));
   AddPane(ar, tr("AR Codes"));
   AddPane(gecko, tr("Gecko Codes"));
+  AddPane(riivolution, tr("Riivolution"));
   AddWrappedPane(graphics_mod_list, tr("Graphics Mods"));
 
   if (game.GetPlatform() != DiscIO::Platform::ELFOrDOL)

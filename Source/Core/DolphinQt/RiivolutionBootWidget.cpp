@@ -39,14 +39,10 @@ struct GuiRiivolutionPatchIndex
 
 Q_DECLARE_METATYPE(GuiRiivolutionPatchIndex);
 
-RiivolutionBootWidget::RiivolutionBootWidget(std::string game_id, std::optional<u16> revision,
-                                             std::optional<u8> disc, std::string base_game_path,
-                                             QWidget* parent)
-    : QDialog(parent), m_game_id(std::move(game_id)), m_revision(revision), m_disc_number(disc),
-      m_base_game_path(std::move(base_game_path))
+RiivolutionBootWidget::RiivolutionBootWidget(const UICommon::GameFile& game, QWidget* parent)
+    : QDialog(parent), m_game_id(std::move(game.GetGameID())), m_revision(game.GetRevision()),
+      m_disc_number(game.GetDiscNumber()), m_base_game_path(std::move(game.GetFilePath()))
 {
-  setWindowTitle(tr("Start with Riivolution Patches"));
-
   CreateWidgets();
   ConnectWidgets();
   LoadMatchingXMLs();
@@ -54,7 +50,10 @@ RiivolutionBootWidget::RiivolutionBootWidget(std::string game_id, std::optional<
   resize(QSize(400, 600));
 }
 
-RiivolutionBootWidget::~RiivolutionBootWidget() = default;
+RiivolutionBootWidget::~RiivolutionBootWidget()
+{
+  SaveConfigXMLs();
+}
 
 void RiivolutionBootWidget::CreateWidgets()
 {
@@ -62,8 +61,8 @@ void RiivolutionBootWidget::CreateWidgets()
   m_hc_warning = new HardcoreWarningWidget(this);
 #endif  // USE_RETRO_ACHIEVEMENTS
   auto* open_xml_button = new QPushButton(tr("Open Riivolution XML..."));
-  auto* boot_game_button = new QPushButton(tr("Start"));
-  boot_game_button->setDefault(true);
+  // auto* boot_game_button = new QPushButton(tr("Start"));
+  // boot_game_button->setDefault(true);
   auto* save_preset_button = new QPushButton(tr("Save as Preset..."));
   auto* group_box = new QGroupBox();
   auto* scroll_area = new QScrollArea();
@@ -80,7 +79,7 @@ void RiivolutionBootWidget::CreateWidgets()
   button_layout->addStretch();
   button_layout->addWidget(open_xml_button, 0, Qt::AlignRight);
   button_layout->addWidget(save_preset_button, 0, Qt::AlignRight);
-  button_layout->addWidget(boot_game_button, 0, Qt::AlignRight);
+  // button_layout->addWidget(boot_game_button, 0, Qt::AlignRight);
 
   auto* layout = new QVBoxLayout();
 #ifdef USE_RETRO_ACHIEVEMENTS
@@ -91,7 +90,7 @@ void RiivolutionBootWidget::CreateWidgets()
   setLayout(layout);
 
   connect(open_xml_button, &QPushButton::clicked, this, &RiivolutionBootWidget::OpenXML);
-  connect(boot_game_button, &QPushButton::clicked, this, &RiivolutionBootWidget::BootGame);
+  // connect(boot_game_button, &QPushButton::clicked, this, &RiivolutionBootWidget::BootGame);
   connect(save_preset_button, &QPushButton::clicked, this, &RiivolutionBootWidget::SaveAsPreset);
 }
 
@@ -280,8 +279,9 @@ void RiivolutionBootWidget::SaveConfigXMLs()
   }
 }
 
-void RiivolutionBootWidget::IncludePatches()
+void RiivolutionBootWidget::BootGame()
 {
+  m_patches.clear();
   for (const auto& disc : m_discs)
   {
     auto patches = disc.disc.GeneratePatches(m_game_id);
@@ -295,13 +295,6 @@ void RiivolutionBootWidget::IncludePatches()
 
     m_patches.insert(m_patches.end(), patches.begin(), patches.end());
   }
-}
-
-void RiivolutionBootWidget::BootGame()
-{
-  SaveConfigXMLs();
-  m_patches.clear();
-  IncludePatches();
 
   m_should_boot = true;
   close();

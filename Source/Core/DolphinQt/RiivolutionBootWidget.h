@@ -10,6 +10,7 @@
 
 #include "Common/CommonTypes.h"
 #include "DiscIO/RiivolutionParser.h"
+#include "UICommon/GameFile.h"
 
 #ifdef USE_RETRO_ACHIEVEMENTS
 class HardcoreWarningWidget;
@@ -21,8 +22,7 @@ class RiivolutionBootWidget : public QDialog
 {
   Q_OBJECT
 public:
-  explicit RiivolutionBootWidget(std::string game_id, std::optional<u16> revision,
-                                 std::optional<u8> disc, std::string base_game_path,
+  explicit RiivolutionBootWidget(const UICommon::GameFile& game,
                                  QWidget* parent = nullptr);
   ~RiivolutionBootWidget() override;
 
