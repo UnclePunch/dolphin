@@ -74,6 +74,7 @@
 #include "DiscIO/DirectoryBlob.h"
 #include "DiscIO/NANDImporter.h"
 #include "DiscIO/RiivolutionPatcher.h"
+#include "DiscIO/RiivolutionParser.h"
 
 #include "DolphinQt/AboutDialog.h"
 #include "DolphinQt/Achievements/AchievementsWindow.h"
@@ -713,8 +714,6 @@ void MainWindow::ConnectGameList()
 {
   connect(m_game_list, &GameList::GameSelected, this, [this] { Play(); });
   connect(m_game_list, &GameList::NetPlayHost, this, &MainWindow::NetPlayHost);
-  connect(m_game_list, &GameList::OnStartWithRiivolution, this,
-          &MainWindow::ShowRiivolutionBootWidget);
 
   connect(m_game_list, &GameList::OpenGeneralSettings, this, &MainWindow::ShowGeneralWindow);
   connect(m_game_list, &GameList::OpenGraphicsSettings, this, &MainWindow::ShowGraphicsWindow);
@@ -1156,6 +1155,19 @@ void MainWindow::StartGame(std::unique_ptr<BootParameters>&& parameters)
 
   // We need the render widget before booting.
   ShowRenderWidget();
+
+  if (parameters->riivolution_patches.size() == 0)
+  {
+    auto& disc = std::get<BootParameters::Disc>(parameters->parameters);
+    UICommon::GameFile game(disc.path);
+
+    const std::string& riivolution_dir = File::GetUserPath(D_RIIVOLUTION_IDX);
+
+    const auto patches = DiscIO::Riivolution::GenerateRiivolutionPatchesFromConfig(
+        riivolution_dir, game.GetGameID(), game.GetRevision(), game.GetDiscNumber());
+
+    AddRiivolutionPatches(parameters.get(), std::move(patches));
+  }
 
   // Boot up, show an error if it fails to load the game.
   if (!BootManager::BootCore(m_system, std::move(parameters),
@@ -2068,33 +2080,4 @@ void MainWindow::ShowCheatsManager()
   }
 
   m_cheats_manager->show();
-}
-
-void MainWindow::ShowRiivolutionBootWidget(const UICommon::GameFile& game)
-{
-  auto second_game = m_game_list->FindSecondDisc(game);
-  std::vector<std::string> paths = {game.GetFilePath()};
-  if (second_game != nullptr)
-    paths.push_back(second_game->GetFilePath());
-  std::unique_ptr<BootParameters> boot_params = BootParameters::GenerateFromFile(paths);
-  if (!boot_params)
-    return;
-  if (!std::holds_alternative<BootParameters::Disc>(boot_params->parameters))
-    return;
-
-  auto& disc = std::get<BootParameters::Disc>(boot_params->parameters);
-  RiivolutionBootWidget w(disc.volume->GetGameID(), disc.volume->GetRevision(),
-                          disc.volume->GetDiscNumber(), game.GetFilePath(), this);
-
-#ifdef USE_RETRO_ACHIEVEMENTS
-  connect(&w, &RiivolutionBootWidget::OpenAchievementSettings, this,
-          &MainWindow::ShowAchievementSettings);
-#endif  // USE_RETRO_ACHIEVEMENTS
-
-  w.exec();
-  if (!w.ShouldBoot())
-    return;
-
-  AddRiivolutionPatches(boot_params.get(), std::move(w.GetPatches()));
-  StartGame(std::move(boot_params));
 }

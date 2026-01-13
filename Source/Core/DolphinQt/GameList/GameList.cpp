@@ -436,9 +436,6 @@ void GameList::ShowContextMenu(const QPoint&)
 
     if (!is_mod_descriptor && DiscIO::IsDisc(platform))
     {
-      menu->addAction(tr("Start with Riivolution Patches..."), this,
-                      &GameList::StartWithRiivolution);
-
       menu->addSeparator();
 
       menu->addAction(tr("Set as &Default ISO"), this, &GameList::SetDefaultISO);
