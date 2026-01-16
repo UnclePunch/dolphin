@@ -24,6 +24,8 @@
 #include "Core/State.h"
 #include "Core/System.h"
 
+#include "Core/HW/EXI/EXI_Starpole.h"
+
 #include "DolphinQt/Host.h"
 #include "DolphinQt/QtUtils/ModalMessageBox.h"
 #include "DolphinQt/Resources.h"
@@ -131,7 +133,13 @@ void RenderWidget::dropEvent(QDropEvent* event)
     return;
   }
 
-  State::LoadAs(Core::System::GetInstance(), path.toStdString());
+  const QString extension = file_info.suffix().toLower();
+
+  // handle Starpole replay files
+  if (extension == tr("krf"))
+    ExpansionInterface::DroppedReplay(file_info.filePath().toStdString());
+  else
+    State::LoadAs(Core::System::GetInstance(), path.toStdString());
 }
 
 void RenderWidget::OnHandleChanged(void* handle)

@@ -7,6 +7,7 @@
 
 #include "Common/CommonTypes.h"
 #include "Common/Swap.h"
+
 #include "Core/HW/EXI/EXI_Device.h"
 
 #include <cstdint>
@@ -141,6 +142,9 @@ typedef enum
   // playback
   STARPOLE_CMD_REQMATCH,
   STARPOLE_CMD_REQFRAME,
+
+  // playback
+  STARPOLE_CMD_CHECKPLAYBACK,
 
   // netplay
   STARPOLE_CMD_NETPLAY,
@@ -329,6 +333,7 @@ public:
 
   std::string GenerateReplayFilename();
   int GetLocalNetplayIndex();
+  void SetReplay(std::string);
 
 private:
   void TransferByte(u8& byte) override;
@@ -356,6 +361,9 @@ private:
   // file
   std::unique_ptr<StreamWriter> writer;
   std::unique_ptr<StreamReader> reader;
-  std::string recent_file_path = File::GetUserPath(D_KAR_REPLAY_IDX) + "replay.txt";
+  bool is_playback_queued = 0;
+  std::string replay_file_path = "";
 };
+
+void DroppedReplay(std::string path);
 }  // namespace ExpansionInterface

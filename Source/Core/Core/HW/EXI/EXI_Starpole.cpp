@@ -3,11 +3,16 @@
 
 #include "Core/HW/EXI/EXI_Starpole.h"
 
+#include "Core/HW/EXI/EXI.h"
+#include "Core/HW/EXI/EXI_Device.h"
+#include "Core/HW/EXI/EXI_Channel.h"
+
 #include <string>
 
 #include "Common/CommonTypes.h"
 #include "Common/Logging/Log.h"
 
+#include "Core/Core.h"          // needed to exec code from UI thread on main thread
 #include "Core/HW/Memmap.h"     // needed to write directly to game memory using DMA
 #include "Core/System.h"        // needed to write directly to game memory using DMA
 #include "Core/NetPlayProto.h"  // needed to get netplay player index
@@ -19,7 +24,7 @@ CEXIStarpole::CEXIStarpole(Core::System& system, const std::string& name)
 {
   replay_state = STARPOLE_REPLAYSTATE_NONE;
 
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE INIT");
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI Starpole Init");
 }
 
 void CEXIStarpole::ImmWrite(u32 data, u32 size)
@@ -30,7 +35,7 @@ void CEXIStarpole::ImmWrite(u32 data, u32 size)
   cur_cmd = (StarpoleCmd)(data & 0xFFFF); // remember which data the game is requesting
   cur_args = (data & 0xFFFF0000) >> 16;   // pull out args
 
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE Imm Received cmd {} args {}", (u32)cur_cmd, cur_args);
+  // INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE Imm Received cmd {} args {}", (u32)cur_cmd, cur_args);
 }
 
 u32 CEXIStarpole::ImmRead(u32 size)
@@ -63,6 +68,16 @@ u32 CEXIStarpole::ImmRead(u32 size)
     cur_cmd = STARPOLE_CMD_NUM;             // no follow up DMA, null cur_cmd
     break;
 
+  case STARPOLE_CMD_CHECKPLAYBACK:
+    if (is_playback_queued)
+    {
+      is_playback_queued = 0;
+      response = 1;
+    }
+    else
+      response = 0;
+    break;
+
     case STARPOLE_CMD_NETPLAY:
     response = GetLocalNetplayIndex();
     cur_cmd = STARPOLE_CMD_NUM;  // no follow up DMA, null cur_cmd
@@ -72,7 +87,7 @@ u32 CEXIStarpole::ImmRead(u32 size)
     response = 0;
   }
 
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE Imm Response {:08x}", response);
+  // INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE Imm Response {:08x}", response);
 
   return response;
 }
@@ -80,8 +95,8 @@ u32 CEXIStarpole::ImmRead(u32 size)
 void CEXIStarpole::DMAWrite(u32 address, u32 size)
 {
 
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE DMA Receive: {:08x} bytes, from {:08x} to EXI device",
-               size, address);
+  // INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE DMA Receive: {:08x} bytes, from {:08x} to EXI device",
+  //              size, address);
 
   // get pointer to address we will read from
   u8* read_ptr = m_system.GetMemory().GetPointerForRange(address, size);
@@ -105,8 +120,8 @@ void CEXIStarpole::DMAWrite(u32 address, u32 size)
 
 void CEXIStarpole::DMARead(u32 address, u32 size)
 {
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE DMA Response: {:08x} bytes, from EXI device to {:08x}",
-               size, address);
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE DMA Response to cmd {}: {:08x} bytes, from EXI device to {:08x}",
+               (int)cur_cmd, size, address);
 
   // get pointer to address we will write to
   u8* write_ptr = m_system.GetMemory().GetPointerForRange(address, size);
@@ -213,14 +228,9 @@ void CEXIStarpole::End_Receive()
 // Playback
 int CEXIStarpole::Match_Prepare()
 {
-  std::ifstream in(recent_file_path);       // load txt
-  std::string last_replay_filename;
-  std::getline(in, last_replay_filename);   // get replay filename from txt
-  in.close();
-
   try
   {
-    OpenFile(File::GetUserPath(D_KAR_REPLAY_IDX) + last_replay_filename);
+    OpenFile(replay_file_path);
     return 1;
   }
   catch (const std::exception& e)
@@ -251,11 +261,7 @@ int CEXIStarpole::Frame_Prepare(int index)
   if (offset + frame_size > file_size)
     return 0;
 
-  INFO_LOG_FMT(EXPANSIONINTERFACE,
-               "Frame {} from 0x{:08X} to 0x{:08X} exists within the {:08X} file", index, offset,
-               offset + frame_size, file_size);
-
-  return 1;
+  return frame_size;
 }
 void CEXIStarpole::Frame_Send(u8* write_ptr, u32 index)
 {
@@ -265,9 +271,8 @@ void CEXIStarpole::Frame_Send(u8* write_ptr, u32 index)
   int offset = sizeof(StarpoleDataMatch) + index * match_data.frame_size.ToHost();
   int frame_size = match_data.frame_size.ToHost();
 
-  // INFO_LOG_FMT(EXPANSIONINTERFACE, "Reading file offset 0x{:X} with size 0x{:X}", offset, frame_size);
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Sending frame {} of size 0x{:x}", index, frame_size);
   ReadFileOffset((uint8_t*)&frame, offset, frame_size);
-  
 
   // write to game memory
   memcpy(write_ptr, (void*)&frame, sizeof(frame));
@@ -290,10 +295,10 @@ std::string CEXIStarpole::GenerateReplayFilename()
      << std::put_time(&tm, "%Y%m%d_%H%M%S")
      << ".krf";
 
-  // remember last created replay
-  std::ofstream out(recent_file_path);
-  out << filename.str() << '\n';
-  out.close();
+  // // remember last created replay
+  // std::ofstream out(recent_file_path);
+  // out << filename.str() << '\n';
+  // out.close();
 
   return File::GetUserPath(D_KAR_REPLAY_IDX) + filename.str();
 }
@@ -313,5 +318,32 @@ int CEXIStarpole::GetLocalNetplayIndex()
   return -1;
 }
 
+void CEXIStarpole::SetReplay(std::string path)
+{
+  replay_file_path = path;
+  is_playback_queued = 1;
+  INFO_LOG_FMT(EXPANSIONINTERFACE,
+               "Set replay file to {}", replay_file_path);
+}
+
+void DroppedReplay(std::string path)
+{
+  auto& system = Core::System::GetInstance();
+
+  Core::RunOnCPUThread(
+      system,
+      [path = std::move(path)] {
+        auto& system = Core::System::GetInstance();
+        auto& exi = system.GetExpansionInterface();
+        auto* channel = exi.GetChannel(1);
+        auto* device = channel->GetDevice(1);
+        if (device && device->m_device_type == ExpansionInterface::EXIDeviceType::Starpole)
+        {
+          auto starpole = static_cast<ExpansionInterface::CEXIStarpole*>(device);
+          starpole->SetReplay(path);
+        }
+      },
+      true);
+}
 }  // namespace ExpansionInterface
 
