@@ -231,6 +231,7 @@ typedef struct
 {
   be_u32 frame_idx;
   be_u32 rng_seed;
+  be_u32 hash;
   u8 ply_num;
   struct
   {
