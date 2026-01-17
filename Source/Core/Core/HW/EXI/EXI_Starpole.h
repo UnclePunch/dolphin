@@ -24,6 +24,13 @@ struct be_u32
 {
   u32 val;  // stored big-endian
 
+  // Default constructor
+  be_u32() : val(0) {}
+
+  // Construct from host uint32
+  explicit be_u32(u32 host_val) { FromHost(host_val); }
+
+  // Convert stored big-endian to host
   u32 ToHost() const
   {
 #if defined(_MSC_VER)
@@ -33,36 +40,46 @@ struct be_u32
 #endif
   }
 
-  void FromHost(u32 v)
+  // Store host value in big-endian format
+  void FromHost(u32 host_val)
   {
 #if defined(_MSC_VER)
-    val = _byteswap_ulong(v);
+    val = _byteswap_ulong(host_val);
 #else
-    val = __builtin_bswap32(v);
+    val = __builtin_bswap32(host_val);
 #endif
   }
+
+  // Static helper: construct from host value
+  static be_u32 FromHostValue(u32 host_val) { return be_u32(host_val); }
 };
 struct be_s32
 {
   s32 val;  // stored big-endian
 
+  be_s32() : val(0) {}
+
+  explicit be_s32(s32 host_val) { FromHost(host_val); }
+
   s32 ToHost() const
   {
 #if defined(_MSC_VER)
-    return _byteswap_ulong(val);
+    return static_cast<s32>(_byteswap_ulong(static_cast<u32>(val)));
 #else
-    return __builtin_bswap32(val);
+    return static_cast<s32>(__builtin_bswap32(static_cast<u32>(val)));
 #endif
   }
 
-  void FromHost(u32 v)
+  void FromHost(s32 host_val)
   {
 #if defined(_MSC_VER)
-    val = _byteswap_ulong(v);
+    val = static_cast<s32>(_byteswap_ulong(static_cast<u32>(host_val)));
 #else
-    val = __builtin_bswap32(v);
+    val = static_cast<s32>(__builtin_bswap32(static_cast<u32>(host_val)));
 #endif
   }
+
+  static be_s32 FromHostValue(s32 host_val) { return be_s32(host_val); }
 };
 struct be_u16
 {
@@ -203,6 +220,11 @@ typedef struct
     int x2c;          // 0x2c
   }ply_desc[4];
 } StarpoleDataMatch;
+typedef struct
+{
+  be_s32 ply;
+  char usernames[4][31];
+} StarpoleDataNetplay;
 
 #pragma pack(push, 1)
 typedef struct
@@ -337,6 +359,9 @@ public:
 
 private:
   void TransferByte(u8& byte) override;
+
+  // Netplay
+  void Netplay_SendInfo(u8* write_ptr);
 
   // Recroding
   void Match_Receive(u8* read_ptr, u32 size);

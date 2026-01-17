@@ -79,8 +79,7 @@ u32 CEXIStarpole::ImmRead(u32 size)
     break;
 
     case STARPOLE_CMD_NETPLAY:
-    response = GetLocalNetplayIndex();
-    cur_cmd = STARPOLE_CMD_NUM;  // no follow up DMA, null cur_cmd
+    response = NetPlay::IsNetPlayRunning();
     break;
 
   default:
@@ -138,6 +137,9 @@ void CEXIStarpole::DMARead(u32 address, u32 size)
   case STARPOLE_CMD_REQFRAME:
     Frame_Send(write_ptr, cur_args);
     break;
+  case STARPOLE_CMD_NETPLAY:
+    Netplay_SendInfo(write_ptr);
+    break;
   default:
     ERROR_LOG_FMT(EXPANSIONINTERFACE, "DMA Reponse not handled!");
     break;
@@ -153,6 +155,25 @@ bool CEXIStarpole::IsPresent() const
 
 void CEXIStarpole::TransferByte(u8& byte)
 {
+}
+
+// Netplay
+void CEXIStarpole::Netplay_SendInfo(u8* write_ptr)
+{
+  StarpoleDataNetplay netplay_info;
+  memset(&netplay_info, 0, sizeof(netplay_info));
+  netplay_info.ply = be_s32::FromHostValue(GetLocalNetplayIndex());
+
+  // populate name array
+  for (int i = 0; i < 4; i++)
+  {
+    NetPlay::PadDetails pad = NetPlay::GetPadDetails(i);
+    if (!pad.player_name.empty())
+      strncpy(netplay_info.usernames[i], pad.player_name.c_str(), sizeof(pad.player_name));
+  }
+
+  // write to game memory
+  memcpy(write_ptr, (void*)&netplay_info, sizeof(netplay_info));
 }
 
 // Recording
