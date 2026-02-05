@@ -12,10 +12,11 @@
 #include "Common/CommonTypes.h"
 #include "Common/Logging/Log.h"
 
-#include "Core/Core.h"          // needed to exec code from UI thread on main thread
-#include "Core/HW/Memmap.h"     // needed to write directly to game memory using DMA
-#include "Core/System.h"        // needed to write directly to game memory using DMA
-#include "Core/NetPlayProto.h"  // needed to get netplay player index
+#include "Core/Core.h"                // needed to exec code from UI thread on main thread
+#include "Core/HW/Memmap.h"           // needed to write directly to game memory using DMA
+#include "Core/System.h"              // needed to write directly to game memory using DMA
+#include "Core/NetPlayProto.h"        // needed to get netplay player index
+#include "VideoCommon/VideoConfig.h"  // aspect ratio
 
 namespace ExpansionInterface
 {
@@ -79,7 +80,7 @@ u32 CEXIStarpole::ImmRead(u32 size)
     break;
 
     case STARPOLE_CMD_NETPLAY:
-    response = NetPlay::IsNetPlayRunning();
+    response = 1; // NetPlay::IsNetPlayRunning()
     break;
 
   default:
@@ -162,14 +163,43 @@ void CEXIStarpole::Netplay_SendInfo(u8* write_ptr)
 {
   StarpoleDataNetplay netplay_info;
   memset(&netplay_info, 0, sizeof(netplay_info));
+
+  float expected_aspect;
+  switch (g_Config.aspect_mode)
+  {
+  default:
+  case AspectMode::Auto:
+  case AspectMode::ForceStandard:
+    expected_aspect = 4.0f / 3.0f;
+    break;
+  case AspectMode::ForceWide:
+    expected_aspect = 16.0f / 9.0f;
+    break;
+  // For the custom (relative) case, we want to crop from the native aspect ratio
+  // to the specific target one, as they likely have a small difference
+  case AspectMode::Custom:
+  // There should be no cropping needed in the custom strech case,
+  // as output should always exactly match the target aspect ratio
+  case AspectMode::CustomStretch:
+    expected_aspect = g_ActiveConfig.GetCustomAspectRatio();
+    break;
+  }
+
+  be_float aspect_mult;
+  aspect_mult.FromHost(expected_aspect / (4.0f / 3.0f));
+  netplay_info.aspect_mult = aspect_mult;
+
   netplay_info.ply = be_s32::FromHostValue(GetLocalNetplayIndex());
 
-  // populate name array
-  for (int i = 0; i < 4; i++)
+  if (NetPlay::IsNetPlayRunning())
   {
-    NetPlay::PadDetails pad = NetPlay::GetPadDetails(i);
-    if (!pad.player_name.empty())
-      strncpy(netplay_info.usernames[i], pad.player_name.c_str(), sizeof(pad.player_name));
+    // populate name array
+    for (int i = 0; i < 4; i++)
+    {
+      NetPlay::PadDetails pad = NetPlay::GetPadDetails(i);
+      if (!pad.player_name.empty())
+        strncpy(netplay_info.usernames[i], pad.player_name.c_str(), sizeof(pad.player_name));
+    }
   }
 
   // write to game memory

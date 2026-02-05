@@ -222,6 +222,7 @@ typedef struct
 } StarpoleDataMatch;
 typedef struct
 {
+  be_float aspect_mult;
   be_s32 ply;
   char usernames[4][31];
 } StarpoleDataNetplay;
