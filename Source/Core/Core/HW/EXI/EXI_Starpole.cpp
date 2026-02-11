@@ -189,6 +189,7 @@ void CEXIStarpole::Netplay_SendInfo(u8* write_ptr)
   aspect_mult.FromHost(expected_aspect / (4.0f / 3.0f));
   netplay_info.aspect_mult = aspect_mult;
 
+  netplay_info.is_netplay = be_u32::FromHostValue(NetPlay::IsNetPlayRunning());
   netplay_info.ply = be_s32::FromHostValue(GetLocalNetplayIndex());
 
   if (NetPlay::IsNetPlayRunning())

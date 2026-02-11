@@ -223,6 +223,7 @@ typedef struct
 typedef struct
 {
   be_float aspect_mult;
+  be_u32 is_netplay;
   be_s32 ply;
   char usernames[4][31];
 } StarpoleDataNetplay;
