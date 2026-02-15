@@ -10,6 +10,8 @@
 
 #include "Core/HW/EXI/EXI_Device.h"
 
+#include "InputCommon/GCPadStatus.h"
+
 #include <cstdint>
 #include <fstream>
 
@@ -163,8 +165,12 @@ typedef enum
   // playback
   STARPOLE_CMD_CHECKPLAYBACK,
 
-  // netplay
-  STARPOLE_CMD_NETPLAY,
+  // dolphin
+  STARPOLE_CMD_DOLPHIN,
+
+  // netsync
+  STARPOLE_CMD_NETPADSEND,
+  STARPOLE_CMD_NETPADRECV,
 
   // end
   STARPOLE_CMD_NUM,
@@ -225,6 +231,7 @@ typedef struct
   be_float aspect_mult;
   be_u32 is_netplay;
   be_s32 ply;
+  be_u32 rng_seed;
   char usernames[4][31];
 } StarpoleDataNetplay;
 
@@ -359,12 +366,19 @@ public:
   std::string GenerateReplayFilename();
   int GetLocalNetplayIndex();
   void SetReplay(std::string);
+  void SetRNGSeed(u32 seed);
+
+  bool NetPlay_SendGameInput(GCPadStatus* status);
+  bool NetPlay_GetGameInput(GCPadStatus* status);
+  u32  NetPlay_GetGameRNG();
 
 private:
   void TransferByte(u8& byte) override;
 
   // Netplay
-  void Netplay_SendInfo(u8* write_ptr);
+  void Dolphin_SendInfo(u8* write_ptr);
+  void Netsync_ReceiveInputs(u8* read_ptr, u32 size);
+  void Netsync_SendInputs(u8* write_ptr);
 
   // Recroding
   void Match_Receive(u8* read_ptr, u32 size);
@@ -382,6 +396,8 @@ private:
   StarpoleCmd cur_cmd = STARPOLE_CMD_NUM;  // current operation being carried out
   u32         cur_args = 0;
 
+  
+  GCPadStatus           pad_status[4];   
   StarpoleDataMatch     match_data;   
   u32                   frame_idx;       // used to sequentially send game frames
   StarpoleReplayState   replay_state;
@@ -393,5 +409,5 @@ private:
   std::string replay_file_path = "";
 };
 
-void DroppedReplay(std::string path);
+ExpansionInterface::CEXIStarpole* Starpole_Get();
 }  // namespace ExpansionInterface

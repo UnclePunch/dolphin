@@ -16,6 +16,7 @@
 #include "Core/HW/Memmap.h"           // needed to write directly to game memory using DMA
 #include "Core/System.h"              // needed to write directly to game memory using DMA
 #include "Core/NetPlayProto.h"        // needed to get netplay player index
+#include "Core/NetPlayClient.h"       // needed to send data over netplay
 #include "VideoCommon/VideoConfig.h"  // aspect ratio
 
 namespace ExpansionInterface
@@ -79,8 +80,18 @@ u32 CEXIStarpole::ImmRead(u32 size)
       response = 0;
     break;
 
-    case STARPOLE_CMD_NETPLAY:
+  case STARPOLE_CMD_DOLPHIN:
     response = 1; // NetPlay::IsNetPlayRunning()
+    break;
+
+  case STARPOLE_CMD_NETPADSEND:
+    response = 1;       // signal we are ready to receive the inputs
+    break;
+
+  case STARPOLE_CMD_NETPADRECV:
+    // check if we have all the inputs for the frame
+    response = NetPlay_GetGameInput(pad_status);
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE Requested inputs, returned {}", response);
     break;
 
   default:
@@ -110,6 +121,9 @@ void CEXIStarpole::DMAWrite(u32 address, u32 size)
   case STARPOLE_CMD_FRAME:
     Frame_Receive(read_ptr, size);
     break;
+  case STARPOLE_CMD_NETPADSEND:
+    Netsync_ReceiveInputs(read_ptr, size);
+    break;
   default:
     ERROR_LOG_FMT(EXPANSIONINTERFACE, "DMA Receive not handled!");
     break;
@@ -138,9 +152,13 @@ void CEXIStarpole::DMARead(u32 address, u32 size)
   case STARPOLE_CMD_REQFRAME:
     Frame_Send(write_ptr, cur_args);
     break;
-  case STARPOLE_CMD_NETPLAY:
-    Netplay_SendInfo(write_ptr);
+  case STARPOLE_CMD_DOLPHIN:
+    Dolphin_SendInfo(write_ptr);
     break;
+  case STARPOLE_CMD_NETPADRECV:
+    Netsync_SendInputs(write_ptr);
+    break;
+
   default:
     ERROR_LOG_FMT(EXPANSIONINTERFACE, "DMA Reponse not handled!");
     break;
@@ -158,8 +176,8 @@ void CEXIStarpole::TransferByte(u8& byte)
 {
 }
 
-// Netplay
-void CEXIStarpole::Netplay_SendInfo(u8* write_ptr)
+// Dolphin
+void CEXIStarpole::Dolphin_SendInfo(u8* write_ptr)
 {
   StarpoleDataNetplay netplay_info;
   memset(&netplay_info, 0, sizeof(netplay_info));
@@ -190,6 +208,7 @@ void CEXIStarpole::Netplay_SendInfo(u8* write_ptr)
   netplay_info.aspect_mult = aspect_mult;
 
   netplay_info.is_netplay = be_u32::FromHostValue(NetPlay::IsNetPlayRunning());
+  netplay_info.rng_seed = be_u32::FromHostValue(NetPlay_GetGameRNG());
   netplay_info.ply = be_s32::FromHostValue(GetLocalNetplayIndex());
 
   if (NetPlay::IsNetPlayRunning())
@@ -205,6 +224,19 @@ void CEXIStarpole::Netplay_SendInfo(u8* write_ptr)
 
   // write to game memory
   memcpy(write_ptr, (void*)&netplay_info, sizeof(netplay_info));
+}
+void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
+{
+  GCPadStatus status[4];
+  memcpy((void*)status, read_ptr, size);
+
+  // send to netplay clients
+  NetPlay_SendGameInput((GCPadStatus*)status);
+}
+void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
+{
+  // write to game memory
+  memcpy(write_ptr, (void*)&pad_status, sizeof(pad_status));
 }
 
 // Recording
@@ -377,25 +409,25 @@ void CEXIStarpole::SetReplay(std::string path)
   INFO_LOG_FMT(EXPANSIONINTERFACE,
                "Set replay file to {}", replay_file_path);
 }
+void CEXIStarpole::SetRNGSeed(u32 seed)
+{
+  m_initial_rng_seed = seed;
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Set m_initial_rng_seed to 0x{:08X}", m_initial_rng_seed);
+}
 
-void DroppedReplay(std::string path)
+ExpansionInterface::CEXIStarpole* Starpole_Get()
 {
   auto& system = Core::System::GetInstance();
+  auto& exi = system.GetExpansionInterface();
+  auto* channel = exi.GetChannel(1);
+  auto* device = channel->GetDevice(1);
+  if (device && device->m_device_type == ExpansionInterface::EXIDeviceType::Starpole)
+  {
+    auto starpole = static_cast<ExpansionInterface::CEXIStarpole*>(device);
+    return starpole;
+  }
 
-  Core::RunOnCPUThread(
-      system,
-      [path = std::move(path)] {
-        auto& system = Core::System::GetInstance();
-        auto& exi = system.GetExpansionInterface();
-        auto* channel = exi.GetChannel(1);
-        auto* device = channel->GetDevice(1);
-        if (device && device->m_device_type == ExpansionInterface::EXIDeviceType::Starpole)
-        {
-          auto starpole = static_cast<ExpansionInterface::CEXIStarpole*>(device);
-          starpole->SetReplay(path);
-        }
-      },
-      true);
+  return NULL;
 }
 }  // namespace ExpansionInterface
 

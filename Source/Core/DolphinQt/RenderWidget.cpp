@@ -137,7 +137,20 @@ void RenderWidget::dropEvent(QDropEvent* event)
 
   // handle Starpole replay files
   if (extension == tr("krf"))
-    ExpansionInterface::DroppedReplay(file_info.filePath().toStdString());
+  {
+    auto& system = Core::System::GetInstance();
+
+    Core::RunOnCPUThread(
+        system,
+        [file_info = std::move(file_info)] {
+          auto starpole = ExpansionInterface::Starpole_Get();
+
+          if (starpole)
+            starpole->SetReplay(file_info.filePath().toStdString());
+        },
+        true);
+  }
+    
   else
     State::LoadAs(Core::System::GetInstance(), path.toStdString());
 }

@@ -143,8 +143,11 @@ public:
   };
   bool WiimoteUpdate(const std::span<WiimoteDataBatchEntry>& entries);
   bool GetNetPads(int pad_nb, bool from_vi, GCPadStatus* pad_status);
+  bool SendGameInput(GCPadStatus* status);
+  bool GetGameInput(GCPadStatus* status);
 
   u64 GetInitialRTCValue() const;
+  u32 GetInitialRNG() const;
 
   void OnTraversalStateChanged() override;
   void OnConnectReady(ENetAddress addr) override;
@@ -253,6 +256,8 @@ private:
   void SendStartGamePacket();
   void SendStopGamePacket();
 
+  void SendGameRNGPacket();
+
   void SyncSaveDataResponse(bool success);
   void SyncCodeResponse(bool success);
 
@@ -317,6 +322,8 @@ private:
   void OnGameDigestResult(sf::Packet& packet);
   void OnGameDigestError(sf::Packet& packet);
   void OnGameDigestAbort();
+  void OnGameInput(sf::Packet& packet);
+  void OnGameRNG(sf::Packet& packet);
 
   bool m_is_connected = false;
   ConnectionState m_connection_state = ConnectionState::Failure;
@@ -345,6 +352,7 @@ private:
   std::unordered_map<u32, sf::Packet> m_chunked_data_receive_queue;
 
   u64 m_initial_rtc = 0;
+  u32 m_initial_rng = 0;
   u32 m_timebase_frame = 0;
 
   std::unique_ptr<IOS::HLE::FS::FileSystem> m_wii_sync_fs;

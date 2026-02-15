@@ -1254,6 +1254,59 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
   }
   break;
 
+  case MessageID::GameInput:
+  {
+    // if this is pad data from the last game still being received, ignore it
+    if (player.current_game != m_current_game)
+      break;
+
+    sf::Packet spac;
+    spac << MessageID::GameInput;
+
+    while (!packet.endOfPacket())
+    {
+      PadIndex map;
+      packet >> map;
+
+      // If the data is not from the correct player,
+      // then disconnect them.
+      if (m_pad_map.at(map) != player.pid)
+      {
+        return 1;
+      }
+
+      GCPadStatus pad;
+
+      // pull out pad data
+      packet >> pad.button;
+      packet >> pad.analogA >> pad.analogB >> pad.stickX >> pad.stickY >> pad.substickX >>
+          pad.substickY >> pad.triggerLeft >> pad.triggerRight >> pad.isConnected;
+
+      // place in outgoing packet
+      spac << map << pad.button;
+      spac << pad.analogA << pad.analogB << pad.stickX << pad.stickY << pad.substickX
+           << pad.substickY << pad.triggerLeft << pad.triggerRight << pad.isConnected;
+      
+    }
+
+    SendToClients(spac, player.pid);
+  }
+  break;
+
+  case MessageID::GameRNG:
+  {
+
+    sf::Packet spac;
+    spac << MessageID::GameRNG;
+
+    u32 seed;
+    packet >> seed;
+    spac << seed;
+
+    SendToClients(spac);
+  }
+  break;
+
   default:
     PanicAlertFmtT("Unknown message with id:{0} received from player:{1} Kicking player!",
                    static_cast<u8>(mid), player.pid);

@@ -46,6 +46,7 @@
 #include "Core/GeckoCode.h"
 #include "Core/HW/EXI/EXI.h"
 #include "Core/HW/EXI/EXI_DeviceIPL.h"
+#include "Core/HW/EXI/EXI_Starpole.h"
 #ifdef HAS_LIBMGBA
 #include "Core/HW/GBACore.h"
 #endif
@@ -477,6 +478,14 @@ void NetPlayClient::OnData(sf::Packet& packet)
 
   case MessageID::GameDigestAbort:
     OnGameDigestAbort();
+    break;
+
+  case MessageID::GameInput:
+    OnGameInput(packet);
+    break;
+
+  case MessageID::GameRNG:
+    OnGameRNG(packet);
     break;
 
   default:
@@ -1526,6 +1535,40 @@ void NetPlayClient::OnGameDigestAbort()
   m_dialog->AbortGameDigest();
 }
 
+void NetPlayClient::OnGameInput(sf::Packet& packet)
+{
+  while (!packet.endOfPacket())
+  {
+    PadIndex map;
+    packet >> map;
+
+    GCPadStatus pad;
+    packet >> pad.button;
+    packet >> pad.analogA >> pad.analogB >> pad.stickX >> pad.stickY >> pad.substickX >>
+        pad.substickY >> pad.triggerLeft >> pad.triggerRight >> pad.isConnected;
+
+    // Trusting server for good map value (>=0 && <4)
+    // add to pad buffer
+    m_pad_buffer.at(map).Push(pad);
+    m_gc_pad_event.Set();
+
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE NetPlay, received inputs for player {} 0x{:04X}",
+                 map, pad.button);
+  }
+
+}
+
+void NetPlayClient::OnGameRNG(sf::Packet& packet)
+{
+  while (!packet.endOfPacket())
+  {
+    u32 seed;
+    packet >> seed;
+
+    m_initial_rng = seed;
+  }
+}
+
 void NetPlayClient::Send(const sf::Packet& packet, const u8 channel_id)
 {
   Common::ENet::SendPacket(m_server, packet, channel_id);
@@ -1734,6 +1777,18 @@ void NetPlayClient::SendStartGamePacket()
 }
 
 // called from ---GUI--- thread
+void NetPlayClient::SendGameRNGPacket()
+{
+  u32 seed = std::chrono::system_clock::now().time_since_epoch().count();
+
+  sf::Packet packet;
+  packet << MessageID::GameRNG;
+  packet << seed;
+
+  SendAsync(std::move(packet));
+}
+
+// called from ---GUI--- thread
 void NetPlayClient::SendStopGamePacket()
 {
   sf::Packet packet;
@@ -1747,6 +1802,7 @@ bool NetPlayClient::StartGame(const std::string& path)
 {
   std::lock_guard lkg(m_crit.game);
   SendStartGamePacket();
+  SendGameRNGPacket();
 
   if (m_is_running.IsSet())
   {
@@ -2133,9 +2189,73 @@ bool NetPlayClient::GetNetPads(const int pad_nb, const bool batching, GCPadStatu
   return true;
 }
 
+bool NetPlayClient::GetGameInput(GCPadStatus* status)
+{
+  // ensure we have data for each controller
+  for (int pad_nb = 0; pad_nb < 4; pad_nb++)
+  {
+    if (m_pad_map[pad_nb] == 0)  // Port not used (no player assigned)
+      continue;
+
+    if (m_pad_buffer[pad_nb].Size() == 0)
+      return false;
+  }
+
+  // get pad data
+  for (int pad_nb = 0; pad_nb < 4; pad_nb++)
+    m_pad_buffer[pad_nb].Pop(status[pad_nb]);  // pop data out of buffer
+
+  return true;
+}
+
+// called from ---CPU--- thread
+bool NetPlayClient::SendGameInput(GCPadStatus* status)
+{
+  for (int i = 0; i < 4; i++)
+  {
+    if (IsFirstInGamePad(i))
+    {
+      sf::Packet packet;
+      packet << MessageID::GameInput;
+
+      bool send_packet = false;
+      const int num_local_pads = NumLocalPads();
+      for (int local_pad = 0; local_pad < num_local_pads; local_pad++)
+      {
+        int net_pad = LocalPadToInGamePad(local_pad);
+
+        // adjust the buffer either up or down
+        // inserting multiple padstates or dropping states
+        while (m_pad_buffer[net_pad].Size() <= m_target_buffer_size)
+        {
+          // add to our buffer
+          m_pad_buffer[net_pad].Push(status[local_pad]);
+
+          // add to packet
+          AddPadStateToPacket(net_pad, status[local_pad], packet);
+          send_packet = true;
+        }
+
+      }
+
+      if (send_packet)
+        SendAsync(std::move(packet));
+
+      break;
+    }
+  }
+
+  return true;
+}
+
 u64 NetPlayClient::GetInitialRTCValue() const
 {
   return m_initial_rtc;
+}
+
+u32 NetPlayClient::GetInitialRNG() const
+{
+  return m_initial_rng;
 }
 
 // called from ---CPU--- thread
@@ -2775,7 +2895,24 @@ bool SerialInterface::CSIDevice_GCController::NetPlay_GetInput(int pad_num, GCPa
   std::lock_guard lk(NetPlay::crit_netplay_client);
 
   if (NetPlay::netplay_client)
+  {
+    if (ExpansionInterface::Starpole_Get() != NULL)
+    {
+      if (Config::Get(Config::GetInfoForSIDevice(pad_num)) ==
+          SerialInterface::SIDEVICE_WIIU_ADAPTER)
+      {
+        *status = GCAdapter::Input(pad_num);
+        return true;
+      }
+      else
+      {
+        *status = Pad::GetStatus(pad_num);
+        return true;
+      }
+    }
+
     return NetPlay::netplay_client->GetNetPads(pad_num, NetPlay::s_si_poll_batching, status);
+  }
 
   return false;
 }
@@ -2851,4 +2988,34 @@ int SerialInterface::CSIDevice_GCController::NetPlay_InGamePadToLocalPad(int num
     return NetPlay::netplay_client->InGamePadToLocalPad(numPAD);
 
   return numPAD;
+}
+
+bool ExpansionInterface::CEXIStarpole::NetPlay_SendGameInput(GCPadStatus* status)
+{
+  std::lock_guard lk(NetPlay::crit_netplay_client);
+
+  if (NetPlay::netplay_client)
+    return NetPlay::netplay_client->SendGameInput(status);
+
+  return false;
+}
+
+bool ExpansionInterface::CEXIStarpole::NetPlay_GetGameInput(GCPadStatus* status)
+{
+  std::lock_guard lk(NetPlay::crit_netplay_client);
+
+  if (NetPlay::netplay_client)
+    return NetPlay::netplay_client->GetGameInput(status);
+
+  return false;
+}
+
+u32 ExpansionInterface::CEXIStarpole::NetPlay_GetGameRNG()
+{
+  std::lock_guard lk(NetPlay::crit_netplay_client);
+
+  if (NetPlay::netplay_client)
+    return NetPlay::netplay_client->GetInitialRNG();
+
+  return 0;
 }
