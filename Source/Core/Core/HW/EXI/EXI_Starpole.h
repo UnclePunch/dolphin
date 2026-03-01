@@ -6,9 +6,11 @@
 #include <string>
 
 #include "Common/CommonTypes.h"
+#include "Common/Buffer.h"
 #include "Common/Swap.h"
 
 #include "Core/HW/EXI/EXI_Device.h"
+#include "Core/PowerPC/PowerPC.h"     // 
 
 #include "InputCommon/GCPadStatus.h"
 
@@ -144,6 +146,41 @@ struct be_vec3
   be_float z;
 };
 
+struct DolDataSection
+{
+  u32 address;
+  u32 size;
+};
+
+struct CpuState
+{
+  u32 gpr[32];
+  PowerPC::PairedSingle fpr[32];
+  u32 pc;
+  u32 npc;
+  PowerPC::ConditionRegister cr;
+  UReg_MSR msr;
+  UReg_FPSCR fpscr;
+  u32 xer_ca;
+  u32 xer_so_ov;
+  u32 xer_stringctrl;
+};
+
+struct SavestateChunk
+{
+  u32 address;
+  u32 size;
+  u8* data_ptr;     // exists in savestate
+};
+
+struct SavestateHeader
+{
+  u32 frame_idx;
+  CpuState cpu;
+  size_t chunk_num;
+};
+
+
 // commands to identify operations
 typedef enum
 {
@@ -171,6 +208,7 @@ typedef enum
   // netsync
   STARPOLE_CMD_NETPADSEND,
   STARPOLE_CMD_NETPADRECV,
+  STARPOLE_CMD_NETSAVE,
 
   // end
   STARPOLE_CMD_NUM,
@@ -366,13 +404,21 @@ public:
   std::string GenerateReplayFilename();
   int GetLocalNetplayIndex();
   void SetReplay(std::string);
-  void SetRNGSeed(u32 seed);
 
   bool NetPlay_SendGameInput(GCPadStatus* status);
   bool NetPlay_GetGameInput(GCPadStatus* status);
   u32  NetPlay_GetGameRNG();
 
 private:
+  static constexpr bool BACKUP_ALL_MEMORY = true;
+  static constexpr size_t MAX_SAVESTATES = 6;
+  static constexpr size_t FORCE_ROLLBACK_NUM = MAX_SAVESTATES - 1;
+  std::unique_ptr<u8[]> m_savestate_alloc;
+  int m_savestate_idx = 0;
+  u32 m_savestate_num = 0;
+  u32 m_gameframe_idx = 0;
+  size_t m_savestate_size;
+
   void TransferByte(u8& byte) override;
 
   // Netplay
@@ -391,12 +437,17 @@ private:
   int Frame_Prepare(int index);
   void Frame_Send(u8* write_ptr, u32 index);
 
+  // Rollback
+  void SaveState_GetChunkSizes(std::vector<std::pair<u32, u32>>& chunks);
+  void SaveState_Init();
+  void SaveState();
+  void LoadState(int frames_back);
+
   std::string m_name;
 
   StarpoleCmd cur_cmd = STARPOLE_CMD_NUM;  // current operation being carried out
   u32         cur_args = 0;
 
-  
   GCPadStatus           pad_status[4];   
   StarpoleDataMatch     match_data;   
   u32                   frame_idx;       // used to sequentially send game frames

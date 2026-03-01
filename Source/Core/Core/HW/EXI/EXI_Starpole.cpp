@@ -11,10 +11,13 @@
 
 #include "Common/CommonTypes.h"
 #include "Common/Logging/Log.h"
+#include "Common/ChunkFile.h"         // save states
 
 #include "Core/Core.h"                // needed to exec code from UI thread on main thread
 #include "Core/HW/Memmap.h"           // needed to write directly to game memory using DMA
 #include "Core/System.h"              // needed to write directly to game memory using DMA
+#include "Core/PowerPC/PowerPC.h"     // 
+#include "Core/State.h"               // save states
 #include "Core/NetPlayProto.h"        // needed to get netplay player index
 #include "Core/NetPlayClient.h"       // needed to send data over netplay
 #include "VideoCommon/VideoConfig.h"  // aspect ratio
@@ -42,7 +45,7 @@ void CEXIStarpole::ImmWrite(u32 data, u32 size)
 
 u32 CEXIStarpole::ImmRead(u32 size)
 {
-  int response;
+  int response = 0;
 
   // respond with the appropriate data
   switch (cur_cmd)
@@ -84,14 +87,23 @@ u32 CEXIStarpole::ImmRead(u32 size)
     response = 1; // NetPlay::IsNetPlayRunning()
     break;
 
-  case STARPOLE_CMD_NETPADSEND:
+  case STARPOLE_CMD_NETPADSEND:   // game is sending its inputs
     response = 1;       // signal we are ready to receive the inputs
     break;
 
-  case STARPOLE_CMD_NETPADRECV:
+  case STARPOLE_CMD_NETPADRECV:   // game is requesting inputs
+    if (m_savestate_num > FORCE_ROLLBACK_NUM)
+      response = FORCE_ROLLBACK_NUM + 1;   // FORCE_ROLLBACK_NUM + 1;  // (int)m_savestate_buffer.size() - 1 + 1;
+    else 
+      response = 1;
+
     // check if we have all the inputs for the frame
-    response = NetPlay_GetGameInput(pad_status);
-    INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE Requested inputs, returned {}", response);
+    // response = NetPlay_GetGameInput(pad_status);
+
+    // INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE Requested inputs, returned {}", response);
+    break;
+
+  case STARPOLE_CMD_NETSAVE:
     break;
 
   default:
@@ -232,6 +244,23 @@ void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
 
   // send to netplay clients
   NetPlay_SendGameInput((GCPadStatus*)status);
+
+  u8 minor_scene_idx = m_system.GetMemory().Read_U8(0x805361af);
+  if (minor_scene_idx == 18 && m_system.GetMemory().Read_U32(0x805361bc) >= 0)
+  {
+    // take a savestate
+    SaveState();
+
+    // status[0].button & 0x0100 &&
+    if (m_savestate_num > FORCE_ROLLBACK_NUM)
+    {
+      LoadState(FORCE_ROLLBACK_NUM);    // (int)m_savestate_buffer.size() - 1;
+    }
+
+    m_gameframe_idx++;
+  }
+
+
 }
 void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
 {
@@ -251,10 +280,10 @@ void CEXIStarpole::Match_Receive(u8 *read_ptr, u32 size)
       active_ply_num++;
   }
 
-  INFO_LOG_FMT(EXPANSIONINTERFACE,
-               "Received {}p match being played on gr_kind {} with stadium {}. RNG Seed: {:08x}",
-               active_ply_num, match_data.stage_kind.ToHost(), match_data.stadium_kind,
-               match_data.rng_seed.ToHost());
+  //INFO_LOG_FMT(EXPANSIONINTERFACE,
+  //             "Received {}p match being played on gr_kind {} with stadium {}. RNG Seed: {:08x}",
+  //             active_ply_num, match_data.stage_kind.ToHost(), match_data.stadium_kind,
+  //             match_data.rng_seed.ToHost());
 
   // create a file
   CreateFile(GenerateReplayFilename());
@@ -269,7 +298,7 @@ void CEXIStarpole::Frame_Receive(u8* read_ptr, u32 size)
 
   WriteFile((uint8_t*)&frame, size);
 
-  // Header
+  /*
   INFO_LOG_FMT(EXPANSIONINTERFACE, "Frame {}: RNG Seed: {:08x}, Player Count: {}",
                frame.frame_idx.ToHost(), frame.rng_seed.ToHost(), frame.ply_num);
 
@@ -278,15 +307,9 @@ void CEXIStarpole::Frame_Receive(u8* read_ptr, u32 size)
   // Per-player data
   for (u32 i = 0; i < ply_count; i++)
   {
-    const auto& ply = frame.ply[i];
+     const auto& ply = frame.ply[i];
 
     INFO_LOG_FMT(EXPANSIONINTERFACE, "Ply {}", ply.idx);
-
-    //INFO_LOG_FMT(EXPANSIONINTERFACE, "  Machine: {} | State: {}", ply.machine_kind.ToHost(),
-    //             ply.rd_state.ToHost());
-
-    //INFO_LOG_FMT(EXPANSIONINTERFACE, "  Pos : ({:.3f}, {:.3f}, {:.3f})", ply.pos.x.ToHost(),
-    //             ply.pos.y.ToHost(), ply.pos.z.ToHost());
 
     INFO_LOG_FMT(EXPANSIONINTERFACE,
                  "  Inputs: LStick({}, {}) RStick({}, {}) Buttons: {:08x}",
@@ -297,6 +320,7 @@ void CEXIStarpole::Frame_Receive(u8* read_ptr, u32 size)
     INFO_LOG_FMT(EXPANSIONINTERFACE, "");
 
   }
+  */
 
 }
 void CEXIStarpole::End_Receive()
@@ -409,10 +433,385 @@ void CEXIStarpole::SetReplay(std::string path)
   INFO_LOG_FMT(EXPANSIONINTERFACE,
                "Set replay file to {}", replay_file_path);
 }
-void CEXIStarpole::SetRNGSeed(u32 seed)
+
+static DolDataSection m_preserve_sections[] = {
+    // {0, 0},
+    {0x80003100, 0x2500},     // dol text section 1
+    {0x80005800, 0x483C40},   // dol text section 2
+    {0, 0},                   // stay
+    {0, 0},                   // AllM
+    {0x00000000, 0x96000},    // XFB buffer 1 80589a48
+    {0x00000000, 0x96000},    // XFB buffer 2 80589a4c
+    {0x00000000, 0x80000},    // gx init alloc in arena lo, performed at 8040fc3c
+    {0, 0},                   // audio heap
+    {0x80550f68, 0x1008},     // file preload table
+
+    // 
+    // 0x1358 - 0x146C inclusive
+    // audio heap allocs
+    // ptr @ 0x1360 - size is 0x300
+    // ptr @ 0x13ac - size is 0x4800
+    // ptr @ 0x13c0 - size is 0x240. this is a disc read struct
+    // 80535994 - size 0x4000. AR region. also 0xF30 -> 0xF38 inclusive
+    // ARQ region. 0xF40 -> 0xF64 inclusive
+    // 0x8058e7d8, size 340. AxFxUnk1
+    // 0x8058ec18 size 96. AxFxUnk2
+    // 
+    // 80599c60 -> 8059a818
+    // HSD ID data is at 0x8058bc94, size 404. must back this up
+    // 8056d958 - thread data? unsure of size, referenced @ 803d9e8c. also some r13 variables, E48 - E50 inclusive
+    // interrupt data. 0xD80 -> 0xE0C
+
+    {0x80535994, 16 * 4},                     // AR region, actual size is 16 * 4
+    // {0x805359d8 + 0x830, 0x834 - 0x830},   // something in game data 805359d8
+    // {0x80537510, 0xA10},                   // persisten aram heap @ 800584fc
+    {0x80538088, 0x17000},                    // fgm/bgm unknown flags/data. audio source data in here too
+    {0x805dd0e0 + 0xF20, 0xF68 - 0xF20},      // ARQ and hsd audio sbss 
+
+    {0x80599c60, 0x8059a818 - 0x80599c60},    // more audio stuff
+    {0x805dd0e0 + 0x1358, 0x1470 - 0x1358},   // hsd audio sbss
+
+    {0x8056ccb4, 0x24},                       // DVD Waiting Queue
+    {0x8056cb40, 0xE0},                       // DVD Interrupt stuff @ 803c40b4. includes alarm
+    {0x8056cc20, 0x94},                       // DVD state stuff @ 803c67f0. another alarm at 0x70 of this?
+
+    {0x8056CCB4, 0x1D34},                    // lots of stuff, VI, SI, etc. just testing
+    //{0x8056e3a0, 0x144},                      // VI Frame Buffer stuff @ 803df32c
+    //{0x805dd0e0 + 0xED8, 0xEDC - 0xEB0},      // VI Frame Buffer variables
+
+    {0x805dd0e0 + 0xC60, 0xCF4 - 0xC60},      // disc read variables
+
+    {0x805dd0e0 + 0xDC8, 0xDD0 - 0xDC8},      // OSAlarm variables
+
+    {0x805dd0e0 + 0x4C8, 0x4},                // file async load flag
+
+    {0x8056e9e8, 0x80587A60 - 0x8056e9e8},     // all the AX data i know of, AXStack head -> end of __AXVPB
+    {0x805dd0e0 + 0xF30, 0x1054 - 0xF30},      // AX region sbss
+
+    {0x8058e298, 64 * 0x4},                   // vpb lookup?
+    {0x8058E398, 0x8F8},                      // unknown in between chunks, part of this is the fgm_kind struct, referenced @ 80442a24
+    {0x8058ec90, 0x90},                       // hps stream unk struct @ 804464bc
+    {0x8058ed20, 2 * 0x4000},                 // hps double buffer?
+    {0x80596d20, 0x40},                       // hps streaming @ 80446a74
+    {0x80596d60, 0x50},                       // hps streaming stuff
+    {0x80596da0, 160 + (512*3)},              // FGM region, multiple offsets of this loaded around 80447ee4. also includes some HPS streaming stuff
+    {0x80597440, 0x220},                      // unknown in between chunks
+
+    // pretty sure this is actually 64 * 152 size...
+    {0x80597660, 0x8C0},                      // pid->vpb struct (8044ccec). 
+    {0x80597F20, 64 * 152},                   // static audio lookup 0X8c0 (8044ccf0)
+    // above ends at 0x8059A520 for reference
+
+
+    //{0x805dd0e0 + 0x13A0, 3 * 0x4},   // unk at 804422c8
+
+    //// disc reads
+    //{0x805dd0e0 + 0x13C0, 8 * 0x4},  // unk at 804422c8
+    //
+    // // AXAlloc
+    //{0x8056e9e8, 128},                // AXStack head
+    //{0x8056ea68, 128},                // AXStack tail
+    //{0x805dd0e0 + 0xFA0, 0x4},        // __AXCallbackStack
+    //
+    // // AXAux
+    //{0x805dd0e0 + 0xFA8, 0x4},        // __AXCallbackAuxA
+    //{0x805dd0e0 + 0xFAC, 0x4},        // __AXCallbackAuxB
+    //{0x805dd0e0 + 0xFB0, 0x4},        // __AXContextAuxA
+    //{0x805dd0e0 + 0xFB4, 0x4},        // Unk
+    //{0x805dd0e0 + 0xFB8, 0x4},        // __AXAuxADspWrite
+    //{0x805dd0e0 + 0xFBC, 0x4},        // __AXAuxADspRead
+    //{0x805dd0e0 + 0xFB4, 0x4},        // __AXContextAuxB
+    //{0x805dd0e0 + 0xFC0, 0x4},        // __AXAuxBDspWrite
+    //{0x805dd0e0 + 0xFC4, 0x4},        // __AXAuxBDspRead
+    //{0x805dd0e0 + 0xFC8, 0x4},        // __AXAuxDspWritePosition
+    //{0x805dd0e0 + 0xFCC, 0x4},        // __AXAuxDspReadPosition
+    //{0x805dd0e0 + 0xFD8, 0x4},        // __AXAuxCpuReadWritePosition
+    //{0x8056eb00, 11520},              // __AXBufferAuxA
+    //{0x80570180, 11520},              // __AXBufferAuxB
+    //
+    // // AXCl
+    //{0x805dd0e0 + 0xFF0, 0x4},        // __AXClMode
+    //{0x805dd0e0 + 0xFE0, 0x4},        // __AXCommandListPosition
+    //{0x805dd0e0 + 0xFE4, 0x4},        // __AXClWrite
+    //{0x805dd0e0 + 0xFEC, 0x4},        // unk
+    //{0x80571800, 1536},               // __AXCommandList
+    // 
+    // // AXOut
+    //{0x805dd0e0 + 0xFF8, 0x4},        // __AXOutDspReady
+    //{0x805dd0e0 + 0x1014, 0x4},       // 
+    //{0x805dd0e0 + 0x1018, 0x4},       // __AXUserFrameCallback
+    //{0x80571e00, 1280},               // __AXOutBuffer
+    //{0x80572300, 640},                // __AXOutBuffer
+    //
+    // // AXSPB
+    //{0x805dd0e0 + 0x1020, 9 * 4},    // 
+    //
+    // // AXVPB
+    //{0x805dd0e0 + 0x1048, 0x4},           // __AXMaxDspCycles
+    //{0x805dd0e0 + 0x104C, 0x4},           // __AXRecDspCycles
+    //{0x80576620, 0x40},                   // AXStudio
+    //{0x80576660, 0x138 + (0xEC * 64)},    // __AXServiceVPB related function data @ 803edc48
+    //{0x8057a160, 0x1000},                 // __AXITD
+    //{0x8057b160, 0x4000},                 // __AXUpdates
+    //{0x8057f160, 0x8900},                 // __AXVPB
+    //{0x805dd0e0 + 0x1050, 0x4},           // __AXNumVoices
+    };
+
+void CEXIStarpole::SaveState_GetChunkSizes(std::vector<std::pair<u32, u32>> &chunks)
 {
-  m_initial_rng_seed = seed;
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "Set m_initial_rng_seed to 0x{:08X}", m_initial_rng_seed);
+  u32 section_num = sizeof(m_preserve_sections) / sizeof(m_preserve_sections[0]);
+
+  u32 current = 0x80000000;
+  const u32 section_end = current + (24 * 1024 * 1024);
+
+  // sort sections
+  std::vector<DolDataSection> sorted_sections(m_preserve_sections,
+                                              m_preserve_sections + section_num);
+  std::sort(sorted_sections.begin(), sorted_sections.end(),
+            [](auto& a, auto& b) { return a.address < b.address; });
+
+  for (u32 i = 0; i < section_num; i++)
+  {
+    DolDataSection ex = sorted_sections[i];
+    u32 ex_start = ex.address;
+    u32 ex_end = ex.address + ex.size;
+
+    // No overlap
+    if (ex_end <= current || ex_start >= section_end)
+      continue;
+
+    // Copy region before exclusion
+    if (ex_start > current)
+    {
+      u32 chunk_size = ex_start - current;
+      u8* ptr = m_system.GetMemory().GetPointerForRange(current, chunk_size);
+      if (ptr)
+        chunks.push_back({current, chunk_size});
+    }
+
+    current = std::max(current, ex_end);
+  }
+
+  // Copy tail after last exclusion
+  if (current < section_end)
+  {
+    u32 chunk_size = section_end - current;
+    u8* ptr = m_system.GetMemory().GetPointerForRange(current, chunk_size);
+    if (ptr)
+      chunks.push_back({current, chunk_size});
+  }
+}
+
+void CEXIStarpole::SaveState_Init()
+{
+  if (m_savestate_alloc)
+    return;
+
+  // heaps
+  m_preserve_sections[2].address = m_system.GetMemory().Read_U32(0x80537fac);
+  m_preserve_sections[2].size = m_system.GetMemory().Read_U32(0x80537fb0);
+  m_preserve_sections[3].address = m_system.GetMemory().Read_U32(0x80537fc8);
+  m_preserve_sections[3].size = m_system.GetMemory().Read_U32(0x80537fcc);
+
+  // XFB buffers
+  m_preserve_sections[4].address = m_system.GetMemory().Read_U32(0x80589a48);
+  m_preserve_sections[5].address = m_system.GetMemory().Read_U32(0x80589a4c);
+
+  // gx FIFO alloc
+  m_preserve_sections[6].address = m_system.GetMemory().Read_U32(0x8056d240);
+
+  // audio heap
+  m_preserve_sections[7].address = m_system.GetMemory().Read_U32(0x804bdb2c);
+  m_preserve_sections[7].size = m_system.GetMemory().Read_U32(0x804bdb30);
+
+  // determine chunk info
+  std::vector<std::pair<u32, u32>> chunks;
+  SaveState_GetChunkSizes(chunks);
+  size_t chunk_num = chunks.size();
+
+  // determine size of the raw data to backup
+  size_t data_size = 0;
+  for (const auto& [addr, size] : chunks)
+  {
+    data_size += size;
+  }
+
+  // determine alloc size
+  size_t savestate_size =
+      sizeof(SavestateHeader) + (sizeof(SavestateChunk) * chunk_num) + data_size;
+
+  // alloc
+  m_savestate_alloc = std::make_unique<u8[]>(savestate_size * MAX_SAVESTATES);
+
+  // init savestates
+  for (int save_idx = 0; save_idx < MAX_SAVESTATES; save_idx++)
+  {
+    auto* header = reinterpret_cast<SavestateHeader*>(m_savestate_alloc.get() + (savestate_size * save_idx));
+
+    header->chunk_num = chunk_num;
+
+    u8* this_chunk_data_ptr = (u8*)header + sizeof(SavestateHeader) + (sizeof(SavestateChunk) * chunk_num);
+
+    // init chunks
+    for (int chunk_idx = 0; chunk_idx < chunk_num; chunk_idx++)
+    {
+      auto* chunk = reinterpret_cast<SavestateChunk*>((u8*)header + sizeof(SavestateHeader) +
+                                                      (sizeof(SavestateChunk) * chunk_idx));
+      chunk->address = chunks[chunk_idx].first;
+      chunk->size = chunks[chunk_idx].second;
+      chunk->data_ptr = this_chunk_data_ptr;
+
+      this_chunk_data_ptr += chunk->size;
+    }
+  }
+
+  m_savestate_idx = 0;
+  m_savestate_num = 0;
+  m_gameframe_idx = 0;
+  m_savestate_size = savestate_size;
+}
+
+void CEXIStarpole::SaveState()
+{
+  SaveState_Init();
+
+  auto start = std::chrono::high_resolution_clock::now();
+
+  //u32 heap_start = m_system.GetMemory().Read_U32(0x80537f58);
+  //u32 heap_size = m_system.GetMemory().Read_U32(0x80537f5c);
+
+  auto* savestate = reinterpret_cast<SavestateHeader*>(m_savestate_alloc.get() + (m_savestate_size * m_savestate_idx));
+  savestate->frame_idx = m_gameframe_idx;
+
+  auto& power_pc = m_system.GetPowerPC();
+  auto& cpu = power_pc.GetPPCState();
+
+  for (int i = 0; i < 32; i++)
+  {
+    savestate->cpu.gpr[i] = cpu.gpr[i];
+    savestate->cpu.fpr[i] = cpu.ps[i];
+  }
+  savestate->cpu.pc = cpu.pc;
+  savestate->cpu.npc = cpu.npc;
+  savestate->cpu.cr = cpu.cr;
+  savestate->cpu.msr.Hex = cpu.msr.Hex;
+  savestate->cpu.fpscr.Hex = cpu.fpscr.Hex;
+  savestate->cpu.xer_ca = cpu.xer_ca;
+  savestate->cpu.xer_so_ov = cpu.xer_so_ov;
+  savestate->cpu.xer_stringctrl = cpu.xer_stringctrl;
+
+  // just get it all
+  if (BACKUP_ALL_MEMORY == true)
+  {
+    // save chunks
+    for (int chunk_idx = 0; chunk_idx < savestate->chunk_num; chunk_idx++)
+    {
+      auto* chunk = reinterpret_cast<SavestateChunk*>((u8*)savestate + sizeof(SavestateHeader) +
+                                                      (sizeof(SavestateChunk) * chunk_idx));
+
+      u8* ptr = m_system.GetMemory().GetPointerForRange(chunk->address, chunk->size);
+      if (ptr)
+      {
+        auto copy_start = std::chrono::high_resolution_clock::now();
+        memcpy(chunk->data_ptr, ptr, chunk->size);
+        auto copy_end = std::chrono::high_resolution_clock::now();
+
+        auto copy_duration =
+            std::chrono::duration_cast<std::chrono::microseconds>(copy_end - copy_start);
+        INFO_LOG_FMT(EXPANSIONINTERFACE, " memcpy'd 0x{:08X} (0x{:X}) section in {:.4f} ms",
+                     chunk->address, chunk->size,
+                     copy_duration.count() / 1000.0);
+      }
+
+    }
+  }
+
+  //// Calculate total size
+  //size_t total_size = savestate.heap_size;
+  //for (const auto& [addr, data] : savestate.dol_sections)
+  //{
+  //  total_size += data.size();
+  //}
+
+  //// push to buffer
+  //m_savestate_buffer.push_back(std::move(savestate));
+
+  //// remove oldest if over limit
+  //if (m_savestate_buffer.size() > MAX_SAVESTATES + 1)
+  //{
+  //  m_savestate_buffer.pop_front();
+  //}
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "frame {} savestate created: {:.3f} MB in {:.3f} ms",
+               savestate->frame_idx, m_savestate_size / (1024.0f * 1024.0f), duration.count() / 1000.0);
+
+  m_savestate_idx = (m_savestate_idx + 1) % MAX_SAVESTATES;
+
+  if (m_savestate_num < MAX_SAVESTATES)
+    m_savestate_num++;
+}
+
+void CEXIStarpole::LoadState(int frames_back)
+{
+  auto start = std::chrono::high_resolution_clock::now();
+
+  int newest_idx = (m_savestate_idx - 1 + MAX_SAVESTATES) % MAX_SAVESTATES;
+  int target_idx = (newest_idx - frames_back + MAX_SAVESTATES) % MAX_SAVESTATES;
+
+  auto* savestate = reinterpret_cast<SavestateHeader*>(m_savestate_alloc.get() + (m_savestate_size * target_idx));
+
+  if (1)
+  {
+    auto& power_pc = m_system.GetPowerPC();
+    auto& cpu = power_pc.GetPPCState();
+
+    for (int i = 0; i < 32; i++)
+    {
+      cpu.gpr[i] = savestate->cpu.gpr[i];
+      cpu.ps[i] = savestate->cpu.fpr[i];
+    }
+
+    cpu.pc = savestate->cpu.pc;
+    cpu.npc = savestate->cpu.npc;
+    cpu.cr = savestate->cpu.cr;
+    cpu.msr.Hex = savestate->cpu.msr.Hex;
+    cpu.fpscr.Hex = savestate->cpu.fpscr.Hex;
+    cpu.xer_ca = savestate->cpu.xer_ca;
+    cpu.xer_so_ov = savestate->cpu.xer_so_ov;
+    cpu.xer_stringctrl = savestate->cpu.xer_stringctrl;
+  }
+
+  // restore chunks
+  for (int chunk_idx = 0; chunk_idx < savestate->chunk_num; chunk_idx++)
+  {
+    auto* chunk = reinterpret_cast<SavestateChunk*>((u8*)savestate + sizeof(SavestateHeader) +
+                                                    (sizeof(SavestateChunk) * chunk_idx));
+
+    u8* ptr = m_system.GetMemory().GetPointerForRange(chunk->address, chunk->size);
+    if (ptr)
+    {
+      // auto copy_start = std::chrono::high_resolution_clock::now();
+      memcpy(ptr, chunk->data_ptr, chunk->size);
+      //auto copy_end = std::chrono::high_resolution_clock::now();
+
+      //auto copy_duration =
+      //    std::chrono::duration_cast<std::chrono::microseconds>(copy_end - copy_start);
+      //INFO_LOG_FMT(EXPANSIONINTERFACE, " memcpy'd {:08X} section in {:.4f} ms", chunk->size,
+      //             copy_duration.count() / 1000.0);
+    }
+  }
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE,
+               "frame {} savestate loaded: {:.2f} MB in {:.2f} ms (from {} frames ago, slot {})",
+               savestate->frame_idx, (m_savestate_size / (1024.0 * 1024.0)),
+               duration.count() / 1000.0,
+               frames_back, target_idx);
 }
 
 ExpansionInterface::CEXIStarpole* Starpole_Get()
