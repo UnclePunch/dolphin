@@ -444,6 +444,7 @@ static DolDataSection m_preserve_sections[] = {
     {0x00000000, 0x96000},    // XFB buffer 2 80589a4c
     {0x00000000, 0x80000},    // gx init alloc in arena lo, performed at 8040fc3c
     {0, 0},                   // audio heap
+    {0, 0},                   // hoshi + mods
     {0x80550f68, 0x1008},     // file preload table
 
     // 
@@ -463,9 +464,7 @@ static DolDataSection m_preserve_sections[] = {
     // interrupt data. 0xD80 -> 0xE0C
 
     {0x80535994, 16 * 4},                     // AR region, actual size is 16 * 4
-    // {0x805359d8 + 0x830, 0x834 - 0x830},   // something in game data 805359d8
-    // {0x80537510, 0xA10},                   // persisten aram heap @ 800584fc
-    {0x80538088, 0x17000},                    // fgm/bgm unknown flags/data. audio source data in here too
+    {0x80538088, 0x17a28},                    // AudioSourceTable
     {0x805dd0e0 + 0xF20, 0xF68 - 0xF20},      // ARQ and hsd audio sbss 
 
     {0x80599c60, 0x8059a818 - 0x80599c60},    // more audio stuff
@@ -475,7 +474,7 @@ static DolDataSection m_preserve_sections[] = {
     {0x8056cb40, 0xE0},                       // DVD Interrupt stuff @ 803c40b4. includes alarm
     {0x8056cc20, 0x94},                       // DVD state stuff @ 803c67f0. another alarm at 0x70 of this?
 
-    {0x8056CCB4, 0x1D34},                    // lots of stuff, VI, SI, etc. just testing
+    //{0x8056CCB4, 0x1D34},                    // lots of stuff, VI, SI, etc. just testing
     //{0x8056e3a0, 0x144},                      // VI Frame Buffer stuff @ 803df32c
     //{0x805dd0e0 + 0xED8, 0xEDC - 0xEB0},      // VI Frame Buffer variables
 
@@ -497,8 +496,9 @@ static DolDataSection m_preserve_sections[] = {
     {0x80596da0, 160 + (512*3)},              // FGM region, multiple offsets of this loaded around 80447ee4. also includes some HPS streaming stuff
     {0x80597440, 0x220},                      // unknown in between chunks
 
-    // pretty sure this is actually 64 * 152 size...
-    {0x80597660, 0x8C0},                      // pid->vpb struct (8044ccec). 
+    {0x80597660, 0x8C0},                      // pid->vpb struct (8044ccec).
+
+    {0x80597660, 64 * 152},                   // static audio lookup 0X8c0 (8044ccf0)
     {0x80597F20, 64 * 152},                   // static audio lookup 0X8c0 (8044ccf0)
     // above ends at 0x8059A520 for reference
 
@@ -623,6 +623,10 @@ void CEXIStarpole::SaveState_Init()
   // audio heap
   m_preserve_sections[7].address = m_system.GetMemory().Read_U32(0x804bdb2c);
   m_preserve_sections[7].size = m_system.GetMemory().Read_U32(0x804bdb30);
+
+  // hoshi region
+  m_preserve_sections[8].address = m_system.GetMemory().Read_U32(0x804bdb34);
+  m_preserve_sections[8].size = m_system.GetMemory().Read_U32(0x804bdb38);
 
   // determine chunk info
   std::vector<std::pair<u32, u32>> chunks;
