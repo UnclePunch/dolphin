@@ -464,10 +464,13 @@ static DolDataSection m_preserve_sections[] = {
     // interrupt data. 0xD80 -> 0xE0C
 
     {0x80535994, 16 * 4},                     // AR region, actual size is 16 * 4
-    {0x80538088, 0x17a28},                    // AudioSourceTable
-    {0x805dd0e0 + 0xF20, 0xF68 - 0xF20},      // ARQ and hsd audio sbss 
+    // {0x80538088, 0x17a28},                 // AudioSourceTable
+    {0x805383c4, 0xB8 * 512},                 // just audio emitters?
+    {0x805dd0e0 + 0xF20, 0xF68 - 0xF20},      // ARQ and hsd audio sbss
 
-    {0x80599c60, 0x8059a818 - 0x80599c60},    // more audio stuff
+    {0x805dd0e0 + 0xAC, 0x8},                 // 64 bitfield that is raised when the corresponding sg has its volume changed, 0x8044c450
+
+    {0x80599c60, 0x8059a818 - 0x80599c60},    // more audio stuff. sg indexed audio data in here @ 8059a178 and 8059a160?
     {0x805dd0e0 + 0x1358, 0x1470 - 0x1358},   // hsd audio sbss
 
     {0x8056ccb4, 0x24},                       // DVD Waiting Queue
@@ -487,7 +490,7 @@ static DolDataSection m_preserve_sections[] = {
     {0x8056e9e8, 0x80587A60 - 0x8056e9e8},     // all the AX data i know of, AXStack head -> end of __AXVPB
     {0x805dd0e0 + 0xF30, 0x1054 - 0xF30},      // AX region sbss
 
-    {0x8058e298, 64 * 0x4},                   // vpb lookup?
+    {0x8058e298, 64 * 0x4},                   // array of VPB pointers? indexed by FGMInstance index
     {0x8058E398, 0x8F8},                      // unknown in between chunks, part of this is the fgm_kind struct, referenced @ 80442a24
     {0x8058ec90, 0x90},                       // hps stream unk struct @ 804464bc
     {0x8058ed20, 2 * 0x4000},                 // hps double buffer?
@@ -496,12 +499,10 @@ static DolDataSection m_preserve_sections[] = {
     {0x80596da0, 160 + (512*3)},              // FGM region, multiple offsets of this loaded around 80447ee4. also includes some HPS streaming stuff
     {0x80597440, 0x220},                      // unknown in between chunks
 
-    {0x80597660, 0x8C0},                      // pid->vpb struct (8044ccec).
-
-    {0x80597660, 64 * 152},                   // static audio lookup 0X8c0 (8044ccf0)
+    {0x80597660, 64 * 0x98},                  // AXLive voice array. (8044ccf0)
     {0x80597F20, 64 * 152},                   // static audio lookup 0X8c0 (8044ccf0)
     // above ends at 0x8059A520 for reference
-
+    
 
     //{0x805dd0e0 + 0x13A0, 3 * 0x4},   // unk at 804422c8
 
@@ -722,9 +723,9 @@ void CEXIStarpole::SaveState()
 
         auto copy_duration =
             std::chrono::duration_cast<std::chrono::microseconds>(copy_end - copy_start);
-        INFO_LOG_FMT(EXPANSIONINTERFACE, " memcpy'd 0x{:08X} (0x{:X}) section in {:.4f} ms",
-                     chunk->address, chunk->size,
-                     copy_duration.count() / 1000.0);
+        //INFO_LOG_FMT(EXPANSIONINTERFACE, " memcpy'd 0x{:08X} (0x{:X}) section in {:.4f} ms",
+        //             chunk->address, chunk->size,
+        //             copy_duration.count() / 1000.0);
       }
 
     }
