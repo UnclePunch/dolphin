@@ -463,9 +463,10 @@ static DolDataSection m_preserve_sections[] = {
     // 8056d958 - thread data? unsure of size, referenced @ 803d9e8c. also some r13 variables, E48 - E50 inclusive
     // interrupt data. 0xD80 -> 0xE0C
 
+    {0x80508bc8, 0x4 * 3},                    // BGM PID's. needed to stop a song from playing
     {0x80535994, 16 * 4},                     // AR region, actual size is 16 * 4
     // {0x80538088, 0x17a28},                 // AudioSourceTable
-    {0x805383c4, 0xB8 * 512},                 // just audio emitters?
+    // {0x805383c4, 0xB8 * 512},                 // just audio emitters?
     {0x805dd0e0 + 0xF20, 0xF68 - 0xF20},      // ARQ and hsd audio sbss
 
     {0x805dd0e0 + 0xAC, 0x8},                 // 64 bitfield that is raised when the corresponding sg has its volume changed, 0x8044c450
