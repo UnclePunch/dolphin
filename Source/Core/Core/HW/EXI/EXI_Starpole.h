@@ -425,6 +425,7 @@ private:
   void Dolphin_SendInfo(u8* write_ptr);
   void Netsync_ReceiveInputs(u8* read_ptr, u32 size);
   void Netsync_SendInputs(u8* write_ptr);
+  bool Netsync_InRollbackScene();
 
   // Recroding
   void Match_Receive(u8* read_ptr, u32 size);
@@ -440,6 +441,7 @@ private:
   // Rollback
   void SaveState_GetChunkSizes(std::vector<std::pair<u32, u32>>& chunks);
   void SaveState_Init();
+  void SaveState_End();
   void SaveState();
   void LoadState(int frames_back);
 

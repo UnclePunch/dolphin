@@ -92,7 +92,7 @@ u32 CEXIStarpole::ImmRead(u32 size)
     break;
 
   case STARPOLE_CMD_NETPADRECV:   // game is requesting inputs
-    if (m_savestate_num > FORCE_ROLLBACK_NUM)
+    if (Netsync_InRollbackScene() && m_savestate_num > FORCE_ROLLBACK_NUM)
       response = FORCE_ROLLBACK_NUM + 1;   // FORCE_ROLLBACK_NUM + 1;  // (int)m_savestate_buffer.size() - 1 + 1;
     else 
       response = 1;
@@ -245,8 +245,7 @@ void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
   // send to netplay clients
   NetPlay_SendGameInput((GCPadStatus*)status);
 
-  u8 minor_scene_idx = m_system.GetMemory().Read_U8(0x805361af);
-  if (minor_scene_idx == 18 && m_system.GetMemory().Read_U32(0x805361bc) >= 0)
+  if (Netsync_InRollbackScene())
   {
     // take a savestate
     SaveState();
@@ -254,11 +253,13 @@ void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
     // status[0].button & 0x0100 &&
     if (m_savestate_num > FORCE_ROLLBACK_NUM)
     {
-      LoadState(FORCE_ROLLBACK_NUM);    // (int)m_savestate_buffer.size() - 1;
+      LoadState(FORCE_ROLLBACK_NUM);  // (int)m_savestate_buffer.size() - 1;
     }
 
     m_gameframe_idx++;
   }
+  else
+    SaveState_End();
 
 
 }
@@ -267,6 +268,14 @@ void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
   // write to game memory
   memcpy(write_ptr, (void*)&pad_status, sizeof(pad_status));
 }
+bool CEXIStarpole::Netsync_InRollbackScene()
+{
+  u8 minor_scene_idx = m_system.GetMemory().Read_U8(0x805361af);
+  if (minor_scene_idx == 18 && m_system.GetMemory().Read_U32(0x805361bc) >= 0)
+    return 1;
+
+  return 0;
+  }
 
 // Recording
 void CEXIStarpole::Match_Receive(u8 *read_ptr, u32 size)
@@ -676,6 +685,20 @@ void CEXIStarpole::SaveState_Init()
   m_gameframe_idx = 0;
   m_savestate_size = savestate_size;
 }
+
+void CEXIStarpole::SaveState_End()
+{
+  if (m_savestate_alloc == nullptr)
+    return;
+
+  m_savestate_alloc.reset();
+
+  m_savestate_idx = 0;
+  m_savestate_num = 0;
+  m_gameframe_idx = 0;
+  m_savestate_size = 0;
+}
+
 
 void CEXIStarpole::SaveState()
 {
