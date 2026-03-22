@@ -92,8 +92,20 @@ u32 CEXIStarpole::ImmRead(u32 size)
     break;
 
   case STARPOLE_CMD_NETPADRECV:   // game is requesting inputs
-    if (Netsync_InRollbackScene() && m_savestate_num > FORCE_ROLLBACK_NUM)
-      response = FORCE_ROLLBACK_NUM + 1;   // FORCE_ROLLBACK_NUM + 1;  // (int)m_savestate_buffer.size() - 1 + 1;
+    if (Netsync_InRollbackScene())
+    {
+      // increment prediction frame num
+      if (++m_debug_prediction_frame_count > MAX_ROLLBACK_NUM)
+        m_debug_prediction_frame_count = 0;
+
+      response = Netsync_GetSimulationFrames();
+
+      //if (response > 1)
+      //  response -= 1;
+
+      m_gameframe_idx++;
+
+    }
     else 
       response = 1;
 
@@ -250,13 +262,10 @@ void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
     // take a savestate
     SaveState();
 
-    // status[0].button & 0x0100 &&
-    if (m_savestate_num > FORCE_ROLLBACK_NUM)
-    {
-      LoadState(FORCE_ROLLBACK_NUM);  // (int)m_savestate_buffer.size() - 1;
-    }
+    u32 sim_num = Netsync_GetSimulationFrames();
 
-    m_gameframe_idx++;
+    if (sim_num > 1)
+      LoadState(sim_num - 1);
   }
   else
     SaveState_End();
@@ -271,11 +280,19 @@ void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
 bool CEXIStarpole::Netsync_InRollbackScene()
 {
   u8 minor_scene_idx = m_system.GetMemory().Read_U8(0x805361af);
-  if (minor_scene_idx == 18 && m_system.GetMemory().Read_U32(0x805361bc) >= 0)
+  if (minor_scene_idx == 18 &&
+      m_system.GetMemory().Read_U32(0x805361bc) >= 0)
     return 1;
 
   return 0;
-  }
+}
+int CEXIStarpole::Netsync_GetSimulationFrames()
+{
+  if (m_gameframe_idx >= MAX_ROLLBACK_NUM && m_gameframe_idx % MAX_ROLLBACK_NUM == 0)
+    return MAX_ROLLBACK_NUM + 1;
+  else
+    return 1;
+}
 
 // Recording
 void CEXIStarpole::Match_Receive(u8 *read_ptr, u32 size)
@@ -472,9 +489,9 @@ static DolDataSection m_preserve_sections[] = {
     // 8056d958 - thread data? unsure of size, referenced @ 803d9e8c. also some r13 variables, E48 - E50 inclusive
     // interrupt data. 0xD80 -> 0xE0C
 
-    {0x80508bc8, 0x4 * 3},                    // BGM PID's. needed to stop a song from playing
-    {0x80535994, 16 * 4},                     // AR region, actual size is 16 * 4
-    // {0x80538088, 0x17a28},                 // AudioSourceTable
+    {0x80508bc8, 0x4 * 3},                      // BGM PID's. needed to stop a song from playing
+    // {0x80535994, 16 * 4},                     // AR region, actual size is 16 * 4
+    // {0x80538088, 0x17a28},                    // AudioSourceTable
     // {0x805383c4, 0xB8 * 512},                 // just audio emitters?
     {0x805dd0e0 + 0xF20, 0xF68 - 0xF20},      // ARQ and hsd audio sbss
 
@@ -512,7 +529,9 @@ static DolDataSection m_preserve_sections[] = {
     {0x80597660, 64 * 0x98},                  // AXLive voice array. (8044ccf0)
     {0x80597F20, 64 * 152},                   // static audio lookup 0X8c0 (8044ccf0)
     // above ends at 0x8059A520 for reference
-    
+
+    {0x8059a880, 0x618},                      // memcard thread data? referenced by the function 8045b848 in the thread func
+    {0x805b4698, 0x35C},                      // memcard thread data
 
     //{0x805dd0e0 + 0x13A0, 3 * 0x4},   // unk at 804422c8
 

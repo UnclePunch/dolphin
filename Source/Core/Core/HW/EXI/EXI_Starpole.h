@@ -411,13 +411,15 @@ public:
 
 private:
   static constexpr bool BACKUP_ALL_MEMORY = true;
-  static constexpr size_t MAX_SAVESTATES = 6;
-  static constexpr size_t FORCE_ROLLBACK_NUM = MAX_SAVESTATES - 1;
+  static constexpr size_t MAX_ROLLBACK_NUM = 5;
+  static constexpr size_t MAX_SAVESTATES = MAX_ROLLBACK_NUM + 1;
   std::unique_ptr<u8[]> m_savestate_alloc;
   int m_savestate_idx = 0;
   u32 m_savestate_num = 0;
   u32 m_gameframe_idx = 0;
   size_t m_savestate_size;
+
+  u32 m_debug_prediction_frame_count = 0;
 
   void TransferByte(u8& byte) override;
 
@@ -426,6 +428,7 @@ private:
   void Netsync_ReceiveInputs(u8* read_ptr, u32 size);
   void Netsync_SendInputs(u8* write_ptr);
   bool Netsync_InRollbackScene();
+  int Netsync_GetSimulationFrames();
 
   // Recroding
   void Match_Receive(u8* read_ptr, u32 size);
