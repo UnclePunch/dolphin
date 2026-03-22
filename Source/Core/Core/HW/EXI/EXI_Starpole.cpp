@@ -87,12 +87,16 @@ u32 CEXIStarpole::ImmRead(u32 size)
     response = 1; // NetPlay::IsNetPlayRunning()
     break;
 
+  case STARPOLE_CMD_NETSTART:     // game is sending preserve sections
+    response = 1;
+    break;
+
   case STARPOLE_CMD_NETPADSEND:   // game is sending its inputs
     response = 1;       // signal we are ready to receive the inputs
     break;
 
   case STARPOLE_CMD_NETPADRECV:   // game is requesting inputs
-    if (Netsync_InRollbackScene())
+    if (m_is_rollback_active)
     {
       // increment prediction frame num
       if (++m_debug_prediction_frame_count > MAX_ROLLBACK_NUM)
@@ -115,7 +119,8 @@ u32 CEXIStarpole::ImmRead(u32 size)
     // INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE Requested inputs, returned {}", response);
     break;
 
-  case STARPOLE_CMD_NETSAVE:
+  case STARPOLE_CMD_NETEND:
+    SaveState_End();
     break;
 
   default:
@@ -145,9 +150,13 @@ void CEXIStarpole::DMAWrite(u32 address, u32 size)
   case STARPOLE_CMD_FRAME:
     Frame_Receive(read_ptr, size);
     break;
+  case STARPOLE_CMD_NETSTART:
+    SaveState_Init((DolDataSection *)read_ptr, cur_args);
+    break;
   case STARPOLE_CMD_NETPADSEND:
     Netsync_ReceiveInputs(read_ptr, size);
     break;
+
   default:
     ERROR_LOG_FMT(EXPANSIONINTERFACE, "DMA Receive not handled!");
     break;
@@ -257,7 +266,7 @@ void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
   // send to netplay clients
   NetPlay_SendGameInput((GCPadStatus*)status);
 
-  if (Netsync_InRollbackScene())
+  if (m_is_rollback_active)
   {
     // take a savestate
     SaveState();
@@ -267,25 +276,13 @@ void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
     if (sim_num > 1)
       LoadState(sim_num - 1);
   }
-  else
-    SaveState_End();
-
-
 }
 void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
 {
   // write to game memory
   memcpy(write_ptr, (void*)&pad_status, sizeof(pad_status));
 }
-bool CEXIStarpole::Netsync_InRollbackScene()
-{
-  u8 minor_scene_idx = m_system.GetMemory().Read_U8(0x805361af);
-  if (minor_scene_idx == 18 &&
-      m_system.GetMemory().Read_U32(0x805361bc) >= 0)
-    return 1;
 
-  return 0;
-}
 int CEXIStarpole::Netsync_GetSimulationFrames()
 {
   if (m_gameframe_idx >= MAX_ROLLBACK_NUM && m_gameframe_idx % MAX_ROLLBACK_NUM == 0)
@@ -587,22 +584,19 @@ static DolDataSection m_preserve_sections[] = {
     //{0x805dd0e0 + 0x1050, 0x4},           // __AXNumVoices
     };
 
-void CEXIStarpole::SaveState_GetChunkSizes(std::vector<std::pair<u32, u32>> &chunks)
+void CEXIStarpole::SaveState_GetChunkSizes(std::vector<DolDataSection> sections, u32 section_num,
+                                           std::vector<std::pair<u32, u32>>& chunks)
 {
-  u32 section_num = sizeof(m_preserve_sections) / sizeof(m_preserve_sections[0]);
-
   u32 current = 0x80000000;
   const u32 section_end = current + (24 * 1024 * 1024);
 
   // sort sections
-  std::vector<DolDataSection> sorted_sections(m_preserve_sections,
-                                              m_preserve_sections + section_num);
-  std::sort(sorted_sections.begin(), sorted_sections.end(),
+  std::sort(sections.begin(), sections.end(),
             [](auto& a, auto& b) { return a.address < b.address; });
 
   for (u32 i = 0; i < section_num; i++)
   {
-    DolDataSection ex = sorted_sections[i];
+    DolDataSection ex = sections[i];
     u32 ex_start = ex.address;
     u32 ex_end = ex.address + ex.size;
 
@@ -632,35 +626,22 @@ void CEXIStarpole::SaveState_GetChunkSizes(std::vector<std::pair<u32, u32>> &chu
   }
 }
 
-void CEXIStarpole::SaveState_Init()
+void CEXIStarpole::SaveState_Init(DolDataSection* read_ptr, u32 section_num)
 {
-  if (m_savestate_alloc)
-    return;
+  if (m_savestate_alloc != nullptr)
+    SaveState_End();
 
-  // heaps
-  m_preserve_sections[2].address = m_system.GetMemory().Read_U32(0x80537fac);
-  m_preserve_sections[2].size = m_system.GetMemory().Read_U32(0x80537fb0);
-  m_preserve_sections[3].address = m_system.GetMemory().Read_U32(0x80537fc8);
-  m_preserve_sections[3].size = m_system.GetMemory().Read_U32(0x80537fcc);
-
-  // XFB buffers
-  m_preserve_sections[4].address = m_system.GetMemory().Read_U32(0x80589a48);
-  m_preserve_sections[5].address = m_system.GetMemory().Read_U32(0x80589a4c);
-
-  // gx FIFO alloc
-  m_preserve_sections[6].address = m_system.GetMemory().Read_U32(0x8056d240);
-
-  // audio heap
-  m_preserve_sections[7].address = m_system.GetMemory().Read_U32(0x804bdb2c);
-  m_preserve_sections[7].size = m_system.GetMemory().Read_U32(0x804bdb30);
-
-  // hoshi region
-  m_preserve_sections[8].address = m_system.GetMemory().Read_U32(0x804bdb34);
-  m_preserve_sections[8].size = m_system.GetMemory().Read_U32(0x804bdb38);
+  // swap byte order cause its coming from PPC
+  std::vector<DolDataSection> sections(section_num);
+  for (size_t i = 0; i < section_num; i++)
+  {
+    sections[i].address = std::byteswap(read_ptr[i].address);
+    sections[i].size    = std::byteswap(read_ptr[i].size);
+  }
 
   // determine chunk info
   std::vector<std::pair<u32, u32>> chunks;
-  SaveState_GetChunkSizes(chunks);
+  SaveState_GetChunkSizes(sections, section_num, chunks);
   size_t chunk_num = chunks.size();
 
   // determine size of the raw data to backup
@@ -703,25 +684,27 @@ void CEXIStarpole::SaveState_Init()
   m_savestate_num = 0;
   m_gameframe_idx = 0;
   m_savestate_size = savestate_size;
+  m_is_rollback_active = true;
 }
 
 void CEXIStarpole::SaveState_End()
 {
-  if (m_savestate_alloc == nullptr)
-    return;
-
-  m_savestate_alloc.reset();
+  m_savestate_alloc.reset();        // streets are saying this is safe to call on a nullptr
 
   m_savestate_idx = 0;
   m_savestate_num = 0;
   m_gameframe_idx = 0;
   m_savestate_size = 0;
+  m_is_rollback_active = false;
 }
-
 
 void CEXIStarpole::SaveState()
 {
-  SaveState_Init();
+  if (m_savestate_alloc == nullptr)
+  {
+    WARN_LOG_FMT(EXPANSIONINTERFACE, "Attempted to savestate before initializing!");
+    return;
+  }
 
   auto start = std::chrono::high_resolution_clock::now();
 
@@ -748,47 +731,26 @@ void CEXIStarpole::SaveState()
   savestate->cpu.xer_so_ov = cpu.xer_so_ov;
   savestate->cpu.xer_stringctrl = cpu.xer_stringctrl;
 
-  // just get it all
-  if (BACKUP_ALL_MEMORY == true)
+  // save chunks
+  for (int chunk_idx = 0; chunk_idx < savestate->chunk_num; chunk_idx++)
   {
-    // save chunks
-    for (int chunk_idx = 0; chunk_idx < savestate->chunk_num; chunk_idx++)
+    auto* chunk = reinterpret_cast<SavestateChunk*>((u8*)savestate + sizeof(SavestateHeader) +
+                                                    (sizeof(SavestateChunk) * chunk_idx));
+
+    u8* ptr = m_system.GetMemory().GetPointerForRange(chunk->address, chunk->size);
+    if (ptr)
     {
-      auto* chunk = reinterpret_cast<SavestateChunk*>((u8*)savestate + sizeof(SavestateHeader) +
-                                                      (sizeof(SavestateChunk) * chunk_idx));
+      auto copy_start = std::chrono::high_resolution_clock::now();
+      memcpy(chunk->data_ptr, ptr, chunk->size);
+      auto copy_end = std::chrono::high_resolution_clock::now();
 
-      u8* ptr = m_system.GetMemory().GetPointerForRange(chunk->address, chunk->size);
-      if (ptr)
-      {
-        auto copy_start = std::chrono::high_resolution_clock::now();
-        memcpy(chunk->data_ptr, ptr, chunk->size);
-        auto copy_end = std::chrono::high_resolution_clock::now();
-
-        auto copy_duration =
-            std::chrono::duration_cast<std::chrono::microseconds>(copy_end - copy_start);
-        //INFO_LOG_FMT(EXPANSIONINTERFACE, " memcpy'd 0x{:08X} (0x{:X}) section in {:.4f} ms",
-        //             chunk->address, chunk->size,
-        //             copy_duration.count() / 1000.0);
-      }
-
+      auto copy_duration =
+          std::chrono::duration_cast<std::chrono::microseconds>(copy_end - copy_start);
+      // INFO_LOG_FMT(EXPANSIONINTERFACE, " memcpy'd 0x{:08X} (0x{:X}) section in {:.4f} ms",
+      //              chunk->address, chunk->size,
+      //              copy_duration.count() / 1000.0);
     }
   }
-
-  //// Calculate total size
-  //size_t total_size = savestate.heap_size;
-  //for (const auto& [addr, data] : savestate.dol_sections)
-  //{
-  //  total_size += data.size();
-  //}
-
-  //// push to buffer
-  //m_savestate_buffer.push_back(std::move(savestate));
-
-  //// remove oldest if over limit
-  //if (m_savestate_buffer.size() > MAX_SAVESTATES + 1)
-  //{
-  //  m_savestate_buffer.pop_front();
-  //}
 
   auto end = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);

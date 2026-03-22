@@ -206,9 +206,10 @@ typedef enum
   STARPOLE_CMD_DOLPHIN,
 
   // netsync
+  STARPOLE_CMD_NETSTART,
   STARPOLE_CMD_NETPADSEND,
   STARPOLE_CMD_NETPADRECV,
-  STARPOLE_CMD_NETSAVE,
+  STARPOLE_CMD_NETEND,
 
   // end
   STARPOLE_CMD_NUM,
@@ -418,6 +419,7 @@ private:
   u32 m_savestate_num = 0;
   u32 m_gameframe_idx = 0;
   size_t m_savestate_size;
+  bool m_is_rollback_active = false;
 
   u32 m_debug_prediction_frame_count = 0;
 
@@ -427,7 +429,6 @@ private:
   void Dolphin_SendInfo(u8* write_ptr);
   void Netsync_ReceiveInputs(u8* read_ptr, u32 size);
   void Netsync_SendInputs(u8* write_ptr);
-  bool Netsync_InRollbackScene();
   int Netsync_GetSimulationFrames();
 
   // Recroding
@@ -442,8 +443,9 @@ private:
   void Frame_Send(u8* write_ptr, u32 index);
 
   // Rollback
-  void SaveState_GetChunkSizes(std::vector<std::pair<u32, u32>>& chunks);
-  void SaveState_Init();
+  void SaveState_GetChunkSizes(std::vector<DolDataSection> sections, u32 section_num,
+                               std::vector<std::pair<u32, u32>>& chunks);
+  void SaveState_Init(DolDataSection* read_ptr, u32 section_num);
   void SaveState_End();
   void SaveState();
   void LoadState(int frames_back);
