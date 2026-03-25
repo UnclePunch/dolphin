@@ -207,6 +207,7 @@ typedef enum
 
   // netsync
   STARPOLE_CMD_NETSTART,
+  STARPOLE_CMD_NETSAVE,
   STARPOLE_CMD_NETPADSEND,
   STARPOLE_CMD_NETPADRECV,
   STARPOLE_CMD_NETEND,
@@ -413,11 +414,12 @@ public:
 private:
   static constexpr bool BACKUP_ALL_MEMORY = true;
   static constexpr size_t MAX_ROLLBACK_NUM = 5;
-  static constexpr size_t MAX_SAVESTATES = MAX_ROLLBACK_NUM + 1;
+  static constexpr size_t MAX_SAVESTATES = MAX_ROLLBACK_NUM;
   std::unique_ptr<u8[]> m_savestate_alloc;
   int m_savestate_idx = 0;
   u32 m_savestate_num = 0;
   u32 m_gameframe_idx = 0;
+  u32 m_req_load = 0;
   size_t m_savestate_size;
   bool m_is_rollback_active = false;
 
@@ -447,8 +449,9 @@ private:
                                std::vector<std::pair<u32, u32>>& chunks);
   void SaveState_Init(DolDataSection* read_ptr, u32 section_num);
   void SaveState_End();
-  void SaveState();
-  void LoadState(int frames_back);
+  SavestateHeader* SaveState_Get(u32 frame_idx);
+  void SaveState(u32 frame_idx);
+  void LoadState(u32 frames_back);
 
   std::string m_name;
 
@@ -457,7 +460,7 @@ private:
 
   GCPadStatus           pad_status[4];   
   StarpoleDataMatch     match_data;   
-  u32                   frame_idx;       // used to sequentially send game frames
+  u32                   m_frame_idx;       // used to sequentially send game frames
   StarpoleReplayState   replay_state;
 
   // file

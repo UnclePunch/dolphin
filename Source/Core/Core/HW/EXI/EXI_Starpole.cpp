@@ -92,23 +92,23 @@ u32 CEXIStarpole::ImmRead(u32 size)
     break;
 
   case STARPOLE_CMD_NETPADSEND:   // game is sending its inputs
-    response = 1;       // signal we are ready to receive the inputs
+    response = 1;                 // signal we are ready to receive the inputs
     break;
 
   case STARPOLE_CMD_NETPADRECV:   // game is requesting inputs
     if (m_is_rollback_active)
     {
-      // increment prediction frame num
-      if (++m_debug_prediction_frame_count > MAX_ROLLBACK_NUM)
-        m_debug_prediction_frame_count = 0;
+      m_gameframe_idx = cur_args;
+      u32 sim_frames = Netsync_GetSimulationFrames();
 
-      response = Netsync_GetSimulationFrames();
+      // request a load state
+      if (sim_frames > 1)
+        m_req_load = (sim_frames - 1);
 
-      //if (response > 1)
-      //  response -= 1;
+      INFO_LOG_FMT(EXPANSIONINTERFACE, "m_gameframe_idx: {}, sim_frames: {}", m_gameframe_idx, sim_frames);
 
-      m_gameframe_idx++;
-
+      // tell game how many frames to simulate
+      response = sim_frames;
     }
     else 
       response = 1;
@@ -117,6 +117,22 @@ u32 CEXIStarpole::ImmRead(u32 size)
     // response = NetPlay_GetGameInput(pad_status);
 
     // INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE Requested inputs, returned {}", response);
+    break;
+
+  case STARPOLE_CMD_NETSAVE:
+    if (m_is_rollback_active)
+    {
+      // load state if needed
+      if (m_req_load)
+      {
+        LoadState(m_req_load);
+        m_req_load = 0;
+      }
+      else
+        SaveState(cur_args);
+    }
+    response = 1;
+
     break;
 
   case STARPOLE_CMD_NETEND:
@@ -263,19 +279,14 @@ void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
   GCPadStatus status[4];
   memcpy((void*)status, read_ptr, size);
 
+  /*
+    Reminder:
+      1. Dolphin receives local inputs (here)
+      2. Dolphin sends all inputs + simulation frames to game
+  */
+
   // send to netplay clients
   NetPlay_SendGameInput((GCPadStatus*)status);
-
-  if (m_is_rollback_active)
-  {
-    // take a savestate
-    SaveState();
-
-    u32 sim_num = Netsync_GetSimulationFrames();
-
-    if (sim_num > 1)
-      LoadState(sim_num - 1);
-  }
 }
 void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
 {
@@ -380,7 +391,7 @@ void CEXIStarpole::Match_Send(u8* write_ptr)
   
   INFO_LOG_FMT(EXPANSIONINTERFACE, "Frame Size 0x{:X}", match_data.frame_size.ToHost());
 
-  frame_idx = 0;
+  m_frame_idx = 0;
   replay_state = STARPOLE_REPLAYSTATE_PLAYBACK;
 }
 int CEXIStarpole::Frame_Prepare(int index)
@@ -408,7 +419,7 @@ void CEXIStarpole::Frame_Send(u8* write_ptr, u32 index)
   // write to game memory
   memcpy(write_ptr, (void*)&frame, sizeof(frame));
 
-  frame_idx++;
+  m_frame_idx++;
 }
 
 std::string CEXIStarpole::GenerateReplayFilename()
@@ -698,7 +709,20 @@ void CEXIStarpole::SaveState_End()
   m_is_rollback_active = false;
 }
 
-void CEXIStarpole::SaveState()
+SavestateHeader* CEXIStarpole::SaveState_Get(u32 frame_idx)
+{
+  for (u32 i = 0; i < m_savestate_num; i++)
+  {
+    auto* savestate = reinterpret_cast<SavestateHeader*>(m_savestate_alloc.get() + (m_savestate_size * i));
+
+    if (savestate->frame_idx == frame_idx)
+      return savestate;
+  }
+
+  return nullptr;
+}
+
+void CEXIStarpole::SaveState(u32 frame_idx)
 {
   if (m_savestate_alloc == nullptr)
   {
@@ -712,7 +736,7 @@ void CEXIStarpole::SaveState()
   //u32 heap_size = m_system.GetMemory().Read_U32(0x80537f5c);
 
   auto* savestate = reinterpret_cast<SavestateHeader*>(m_savestate_alloc.get() + (m_savestate_size * m_savestate_idx));
-  savestate->frame_idx = m_gameframe_idx;
+  savestate->frame_idx = frame_idx;
 
   auto& power_pc = m_system.GetPowerPC();
   auto& cpu = power_pc.GetPPCState();
@@ -764,13 +788,11 @@ void CEXIStarpole::SaveState()
     m_savestate_num++;
 }
 
-void CEXIStarpole::LoadState(int frames_back)
+void CEXIStarpole::LoadState(u32 frames_back)
 {
   auto start = std::chrono::high_resolution_clock::now();
 
-  int newest_idx = (m_savestate_idx - 1 + MAX_SAVESTATES) % MAX_SAVESTATES;
-  int target_idx = (newest_idx - frames_back + MAX_SAVESTATES) % MAX_SAVESTATES;
-
+  u32 target_idx = ((int)m_savestate_idx - (int)frames_back + MAX_SAVESTATES) % MAX_SAVESTATES;
   auto* savestate = reinterpret_cast<SavestateHeader*>(m_savestate_alloc.get() + (m_savestate_size * target_idx));
 
   if (1)
@@ -818,10 +840,10 @@ void CEXIStarpole::LoadState(int frames_back)
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
   INFO_LOG_FMT(EXPANSIONINTERFACE,
-               "frame {} savestate loaded: {:.2f} MB in {:.2f} ms (from {} frames ago, slot {})",
+               "frame {} savestate loaded: {:.2f} MB in {:.2f} ms (from {} frames ago)",
                savestate->frame_idx, (m_savestate_size / (1024.0 * 1024.0)),
                duration.count() / 1000.0,
-               frames_back, target_idx);
+               frames_back);
 }
 
 ExpansionInterface::CEXIStarpole* Starpole_Get()
