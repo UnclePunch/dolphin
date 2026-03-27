@@ -32,6 +32,34 @@ CEXIStarpole::CEXIStarpole(Core::System& system, const std::string& name)
   INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI Starpole Init");
 }
 
+void CEXIStarpole::DoState(PointerWrap& p)
+{
+  p.Do(cur_cmd);
+  p.Do(cur_args);
+
+  p.Do(pad_status);
+  p.Do(m_frame_idx);
+  p.Do(replay_state);
+
+  p.Do(m_is_rollback_active);
+  p.Do(m_savestate_size);
+  p.Do(m_savestate_idx);
+  p.Do(m_savestate_num);
+  p.Do(m_gameframe_idx);
+  p.Do(m_req_load);
+
+  u32 buffer_size = (u32)m_savestate_size * MAX_SAVESTATES;
+
+  bool allocated = m_savestate_alloc != nullptr;
+  p.Do(allocated);
+  if (allocated)
+  {
+    if (p.IsReadMode() && !m_savestate_alloc)
+      m_savestate_alloc = std::make_unique<u8[]>(buffer_size);
+    p.DoArray(m_savestate_alloc.get(), buffer_size);
+  }
+}
+
 void CEXIStarpole::ImmWrite(u32 data, u32 size)
 {
   // INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE ImmWrite: data {:08x} size {}", data, size);
@@ -137,6 +165,7 @@ u32 CEXIStarpole::ImmRead(u32 size)
 
   case STARPOLE_CMD_NETEND:
     SaveState_End();
+    response = 1;
     break;
 
   default:
@@ -278,6 +307,8 @@ void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
 {
   GCPadStatus status[4];
   memcpy((void*)status, read_ptr, size);
+
+  if (status->button & 0x100)
 
   /*
     Reminder:

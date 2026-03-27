@@ -386,6 +386,8 @@ class CEXIStarpole final : public IEXIDevice
 public:
   CEXIStarpole(Core::System& system, const std::string& name);
 
+  void DoState(PointerWrap& p) override;
+
   void ImmWrite(u32 data, u32 size) override;
   u32  ImmRead(u32 size) override;
 

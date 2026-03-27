@@ -53,6 +53,10 @@ void ExpansionInterfaceManager::AddMemoryCard(Slot slot)
             slot, Common::GetStringT(fmt::format("{:n}", memorycard_device).c_str()));
       }
     }
+    else if (Config::Get(Config::GetInfoForEXIDevice(slot)) == EXIDeviceType::Starpole)
+    {
+      memorycard_device = Config::Get(Config::GetInfoForEXIDevice(slot));
+    }
     else
     {
       memorycard_device = EXIDeviceType::None;
