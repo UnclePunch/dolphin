@@ -180,7 +180,6 @@ struct SavestateHeader
   size_t chunk_num;
 };
 
-
 // commands to identify operations
 typedef enum
 {
@@ -222,6 +221,21 @@ typedef enum
   STARPOLE_REPLAYSTATE_RECORD,
   STARPOLE_REPLAYSTATE_PLAYBACK,
 } StarpoleReplayState;
+
+typedef enum
+{
+  STARPOLE_NETPAD_NOTRECEIVED,
+  STARPOLE_NETPAD_PREDICTED,
+  STARPOLE_NETPAD_CORRECTED,
+  STARPOLE_NETPAD_VERIFIED,
+} StarpoleNetPadState;
+
+typedef enum
+{
+  STARPOLE_KIND_DELAY,
+  STARPOLE_KIND_ROLLBACK,
+} StarpoleNetPadKind;
+
 
 // payload structures
 typedef struct
@@ -300,6 +314,16 @@ typedef struct
   } ply[4];
 } StarpoleDataFrame;
 #pragma pack(pop)
+
+struct NetPad
+{
+  GCPadStatus status;
+  StarpoleNetPadKind kind;
+  StarpoleNetPadState state;
+  u32 frame;
+  u32 hash_real;
+  u32 hash_predict;
+};
 
 // file write/read. dolphin probably already has similar classes i can leverage...
 class StreamWriter
@@ -410,22 +434,36 @@ public:
   void SetReplay(std::string);
 
   bool NetPlay_SendGameInput(GCPadStatus* status);
-  bool NetPlay_GetGameInput(GCPadStatus* status);
-  u32  NetPlay_GetGameRNG();
+  void NetPlay_ClearGameInputs();
+  void NetPlay_DrainPadQueue();
+  u32 NetPlay_GetGameRNG();
+
+  bool CheckActive();
 
 private:
-  static constexpr bool BACKUP_ALL_MEMORY = true;
+  // rollback
   static constexpr size_t MAX_ROLLBACK_NUM = 5;
   static constexpr size_t MAX_SAVESTATES = MAX_ROLLBACK_NUM;
   std::unique_ptr<u8[]> m_savestate_alloc;
   int m_savestate_idx = 0;
   u32 m_savestate_num = 0;
-  u32 m_gameframe_idx = 0;
   u32 m_req_load = 0;
   size_t m_savestate_size;
   bool m_is_rollback_active = false;
+  bool m_is_netpause;
+  static constexpr bool ALWAYS_DELAY = false;
+  static constexpr int FORCE_ROLLBACK = 0;
+  static constexpr size_t MAX_DELAY = 99;
+  static constexpr size_t PAD_BUFFER_SIZE = MAX_ROLLBACK_NUM + 1 + MAX_DELAY;  // rollback frames + 1 forward sim frame + 2 delay frames
 
-  u32 m_debug_prediction_frame_count = 0;
+  int m_local_pid;
+  int m_input_delay;
+  NetPad m_pad_buffer[PAD_BUFFER_SIZE][4] = {0};  // 
+  u32 m_player_input_num[4] = {0};                 // how many frames of inputs we've received per player
+  u8 m_player_pad_map[4] = {0};                   // which ports are present
+  int m_sim_frames = 0;                           // how many frames the game should simulate this tick
+  u32 m_confirm_frame;                            // used to know when we are in a prediction
+  u32 m_forward_frame;                            // used for keeping track of the next forward simulation frame
 
   void TransferByte(u8& byte) override;
 
@@ -433,7 +471,10 @@ private:
   void Dolphin_SendInfo(u8* write_ptr);
   void Netsync_ReceiveInputs(u8* read_ptr, u32 size);
   void Netsync_SendInputs(u8* write_ptr);
+  int Netsync_GetConfirmedInputNum();
   int Netsync_GetSimulationFrames();
+  void Netsync_PredictInputs();
+  u32 Netsync_GetLocalInputNum();
 
   // Recroding
   void Match_Receive(u8* read_ptr, u32 size);
@@ -460,10 +501,10 @@ private:
   StarpoleCmd cur_cmd = STARPOLE_CMD_NUM;  // current operation being carried out
   u32         cur_args = 0;
 
-  GCPadStatus           pad_status[4];   
-  StarpoleDataMatch     match_data;   
-  u32                   m_frame_idx;       // used to sequentially send game frames
-  StarpoleReplayState   replay_state;
+  StarpoleDataMatch       match_data;   
+  u32                     m_frame_idx;       // used to sequentially send game frames
+  StarpoleReplayState     replay_state;
+  bool                    is_active = false;
 
   // file
   std::unique_ptr<StreamWriter> writer;

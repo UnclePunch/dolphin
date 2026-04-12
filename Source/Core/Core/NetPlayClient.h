@@ -143,8 +143,12 @@ public:
   };
   bool WiimoteUpdate(const std::span<WiimoteDataBatchEntry>& entries);
   bool GetNetPads(int pad_nb, bool from_vi, GCPadStatus* pad_status);
-  bool SendGameInput(GCPadStatus* status);
-  bool GetGameInput(GCPadStatus* status);
+  bool SendGameInput(GCPadStatus* status, u32 frame, bool is_rollback);
+  void ClearGameInputs();
+  bool GetPlayerGameInput(int pad_nb, GameInput* input);
+  bool HasGameInputForAll();
+  bool GetGameInput(GameInput* input);
+  void AddGameInputToPacket(int in_game_pad, const GameInput& np, sf::Packet& packet);
 
   u64 GetInitialRTCValue() const;
   u32 GetInitialRNG() const;
@@ -200,6 +204,8 @@ protected:
   } m_crit;
 
   Common::SPSCQueue<AsyncQueueEntry> m_async_queue;
+
+  std::array<Common::SPSCQueue<GameInput>, 4> m_game_buffer;
 
   std::array<Common::SPSCQueue<GCPadStatus>, 4> m_pad_buffer;
   std::array<Common::SPSCQueue<WiimoteEmu::SerializedWiimoteState>, 4> m_wiimote_buffer;

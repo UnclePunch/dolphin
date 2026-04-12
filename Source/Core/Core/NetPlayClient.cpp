@@ -1542,18 +1542,22 @@ void NetPlayClient::OnGameInput(sf::Packet& packet)
     PadIndex map;
     packet >> map;
 
-    GCPadStatus pad;
-    packet >> pad.button;
-    packet >> pad.analogA >> pad.analogB >> pad.stickX >> pad.stickY >> pad.substickX >>
-        pad.substickY >> pad.triggerLeft >> pad.triggerRight >> pad.isConnected;
+    GameInput input;
+
+    packet >> input.is_rollback;
+    packet >> input.frame;
+    packet >> input.status.button;
+    packet >> input.status.analogA >> input.status.analogB >> input.status.stickX >>
+        input.status.stickY >> input.status.substickX >> input.status.substickY >>
+        input.status.triggerLeft >> input.status.triggerRight >> input.status.isConnected;
 
     // Trusting server for good map value (>=0 && <4)
     // add to pad buffer
-    m_pad_buffer.at(map).Push(pad);
+    m_game_buffer.at(map).Push(input);
     m_gc_pad_event.Set();
 
-    INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE NetPlay, received inputs for player {} 0x{:04X}",
-                 map, pad.button);
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE NetPlay, received {} inputs for player {} 0x{:04X}",
+                 (input.is_rollback) ? "rollback" : "delay", map, input.status.button);
   }
 
 }
@@ -2189,7 +2193,7 @@ bool NetPlayClient::GetNetPads(const int pad_nb, const bool batching, GCPadStatu
   return true;
 }
 
-bool NetPlayClient::GetGameInput(GCPadStatus* status)
+bool NetPlayClient::GetGameInput(GameInput* input)
 {
   // ensure we have data for each controller
   for (int pad_nb = 0; pad_nb < 4; pad_nb++)
@@ -2197,45 +2201,94 @@ bool NetPlayClient::GetGameInput(GCPadStatus* status)
     if (m_pad_map[pad_nb] == 0)  // Port not used (no player assigned)
       continue;
 
-    if (m_pad_buffer[pad_nb].Size() == 0)
+    if (m_game_buffer[pad_nb].Size() == 0)
       return false;
   }
 
   // get pad data
   for (int pad_nb = 0; pad_nb < 4; pad_nb++)
-    m_pad_buffer[pad_nb].Pop(status[pad_nb]);  // pop data out of buffer
+    m_game_buffer[pad_nb].Pop(*input);  // pop data out of buffer
 
   return true;
 }
 
-// called from ---CPU--- thread
-bool NetPlayClient::SendGameInput(GCPadStatus* status)
+bool NetPlayClient::HasGameInputForAll()
 {
+  for (int i = 0; i < 4; i++)
+  {
+    if (m_pad_map[i] == 0)  // Port not used (no player assigned)
+      continue;
+
+    if (m_game_buffer[i].Size() == 0)
+      return false;
+  }
+
+  return true;
+}
+
+bool NetPlayClient::GetPlayerGameInput(int pad_nb, GameInput* input)
+{
+  if (m_pad_map[pad_nb] == 0)  // Port not used (no player assigned)
+    return false;
+
+  if (m_game_buffer[pad_nb].Size() == 0)
+    return false;
+
+  // get pad data
+  m_game_buffer[pad_nb].Pop(*input);  // pop data out of buffer
+  return true;
+}
+
+// called from ---CPU--- thread
+bool NetPlayClient::SendGameInput(GCPadStatus* status, u32 frame, bool is_rollback)
+{
+  int local_size = 0;
+
   for (int i = 0; i < 4; i++)
   {
     if (IsFirstInGamePad(i))
     {
       sf::Packet packet;
       packet << MessageID::GameInput;
-
       bool send_packet = false;
+
       const int num_local_pads = NumLocalPads();
       for (int local_pad = 0; local_pad < num_local_pads; local_pad++)
       {
         int net_pad = LocalPadToInGamePad(local_pad);
 
-        // adjust the buffer either up or down
-        // inserting multiple padstates or dropping states
-        while (m_pad_buffer[net_pad].Size() <= m_target_buffer_size)
+        GameInput input;
+        input.is_rollback = is_rollback;
+        input.frame = frame;
+        input.status = status[local_pad];
+
+        if (is_rollback)
         {
+          // send unconditionally
+
           // add to our buffer
-          m_pad_buffer[net_pad].Push(status[local_pad]);
+          m_game_buffer[net_pad].Push(input);
 
           // add to packet
-          AddPadStateToPacket(net_pad, status[local_pad], packet);
-          send_packet = true;
+          AddGameInputToPacket(net_pad, input, packet);
+            send_packet = true;
+        }
+        else
+        {
+          // adjust the buffer either up or down
+          // inserting multiple padstates or dropping states
+          while (m_game_buffer[net_pad].Size() <= m_target_buffer_size)
+          {
+            // add to our buffer
+            m_game_buffer[net_pad].Push(input);
+
+            // add to packet
+            AddGameInputToPacket(net_pad, input, packet);
+            send_packet = true;
+          }
         }
 
+        local_size = (int)m_game_buffer[net_pad].Size();
       }
 
       if (send_packet)
@@ -2244,8 +2297,33 @@ bool NetPlayClient::SendGameInput(GCPadStatus* status)
       break;
     }
   }
-
   return true;
+}
+void NetPlayClient::ClearGameInputs()
+{
+  for (int i = 0; i < 4; i++)
+  {
+    while (m_game_buffer[i].Size() > 0)
+      m_game_buffer[i].Pop();
+  }
+  return;
+}
+
+void NetPlayClient::AddGameInputToPacket(int in_game_pad, const GameInput& input, sf::Packet& packet)
+{
+  packet << static_cast<PadIndex>(in_game_pad);
+  packet << input.is_rollback;
+  packet << input.status.button;
+  if (!m_gba_config[in_game_pad].enabled)
+  {
+    packet << input.status.analogA << input.status.analogB << input.status.stickX
+           << input.status.stickY << input.status.substickX << input.status.substickY
+           << input.status.triggerLeft << input.status.triggerRight << input.status.isConnected;
+  }
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE, " sending to clients: port {} ({}:{}) 0x{:04X}", in_game_pad,
+               (s8)input.status.stickX,
+               (s8)input.status.stickY, input.status.button);
 }
 
 u64 NetPlayClient::GetInitialRTCValue() const
@@ -2372,7 +2450,7 @@ bool NetPlayClient::AddLocalWiimoteToBuffer(const int local_wiimote,
   return data_added;
 }
 
-void NetPlayClient::SendPadHostPoll(const PadIndex pad_num)
+void NetPlayClient::SendPadHostPoll(const PadIndex  pad_num)
 {
   // Here we handle polling for the Host Input Authority and Golf modes. Pad data is "polled" from
   // the most recent data received for the given pad. Passing pad_num < 0 will poll all assigned
@@ -2992,22 +3070,96 @@ int SerialInterface::CSIDevice_GCController::NetPlay_InGamePadToLocalPad(int num
 
 bool ExpansionInterface::CEXIStarpole::NetPlay_SendGameInput(GCPadStatus* status)
 {
+  // halt sending inputs if we already sent this frame
+  if (Netsync_GetLocalInputNum() >= (m_forward_frame))
+    return false;
+
   std::lock_guard lk(NetPlay::crit_netplay_client);
 
   if (NetPlay::netplay_client)
-    return NetPlay::netplay_client->SendGameInput(status);
+    return NetPlay::netplay_client->SendGameInput(status, Netsync_GetLocalInputNum(), m_is_rollback_active);
 
   return false;
 }
 
-bool ExpansionInterface::CEXIStarpole::NetPlay_GetGameInput(GCPadStatus* status)
+void ExpansionInterface::CEXIStarpole::NetPlay_ClearGameInputs()
 {
   std::lock_guard lk(NetPlay::crit_netplay_client);
 
   if (NetPlay::netplay_client)
-    return NetPlay::netplay_client->GetGameInput(status);
+    NetPlay::netplay_client->ClearGameInputs();
 
-  return false;
+}
+
+void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
+{
+  std::lock_guard lk(NetPlay::crit_netplay_client);
+
+  if (!NetPlay::netplay_client)
+    return;
+
+  m_local_pid = NetPlay::netplay_client->GetLocalPlayerId();
+
+  NetPlay::PadMappingArray pad_map = NetPlay::netplay_client->GetPadMapping();
+  for (int i = 0; i < 4; i++)
+  {
+    m_player_pad_map[i] = pad_map[i];
+  }
+
+  // preliminary check to make sure i have inputs for all players
+  if (!m_is_rollback_active)
+  {
+    if (!NetPlay::netplay_client->HasGameInputForAll())
+    {
+      m_is_netpause = true;
+      return;
+    }
+    else
+      m_is_netpause = false;
+  }
+  
+  // check each player
+  for (int i = 0; i < 4; i++)
+  {
+    NetPlay::GameInput input;
+    while (NetPlay::netplay_client->GetPlayerGameInput(i, &input))
+    {
+      // discard inputs from a different mode
+      if (input.is_rollback != m_is_rollback_active)
+        continue;
+
+      int arr_idx = (m_player_input_num[i]) % PAD_BUFFER_SIZE;
+
+      m_pad_buffer[arr_idx][i].status = input.status;
+      if (m_pad_buffer[arr_idx][i].state == STARPOLE_NETPAD_PREDICTED)
+        m_pad_buffer[arr_idx][i].state = STARPOLE_NETPAD_CORRECTED;
+      else
+        m_pad_buffer[arr_idx][i].state = STARPOLE_NETPAD_VERIFIED;
+
+      m_pad_buffer[arr_idx][i].frame = m_player_input_num[i];
+
+      // generate input hash
+      u32 h = 0;
+      u8* data = (u8*)&m_pad_buffer[arr_idx][i].status;
+      for (size_t j = 0; j < sizeof(m_pad_buffer[arr_idx][i].status); j++)
+        h = h * 131 + data[j];
+      m_pad_buffer[arr_idx][i].hash_real = h;
+
+      INFO_LOG_FMT(EXPANSIONINTERFACE,
+                   " drained input: port {} ({}:{}) 0x{:04X} to array_index {}", i,
+                   (s8)m_pad_buffer[arr_idx][i].status.stickX,
+                   (s8)m_pad_buffer[arr_idx][i].status.stickY,
+                   m_pad_buffer[arr_idx][i].status.button, arr_idx);
+
+      m_player_input_num[i]++;
+
+      // only grab one 
+      if (!m_is_rollback_active)
+        break;
+    }
+  }
+
+  return;
 }
 
 u32 ExpansionInterface::CEXIStarpole::NetPlay_GetGameRNG()

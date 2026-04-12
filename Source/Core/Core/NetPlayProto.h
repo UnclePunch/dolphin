@@ -14,6 +14,7 @@
 #include "Core/HW/EXI/EXI_Device.h"
 #include "Core/HW/Sram.h"
 #include "VideoCommon/VideoConfig.h"
+#include "InputCommon/GCPadStatus.h"
 
 namespace DiscIO
 {
@@ -255,6 +256,13 @@ struct PadDetails
   bool is_local = false;
   int local_pad = 0;
   bool hide_gba = false;
+};
+
+struct GameInput
+{
+  GCPadStatus status;
+  bool is_rollback;
+  u32 frame;
 };
 
 std::string GetPlayerMappingString(PlayerId pid, const PadMappingArray& pad_map,
