@@ -438,7 +438,6 @@ public:
   void NetPlay_ClearGameInputs();
   void NetPlay_InitData();
   void NetPlay_DrainPadQueue();
-  u32 NetPlay_HashPadStatus(GCPadStatus* status);
   u32 NetPlay_GetGameRNG();
 
   bool CheckActive();
@@ -455,6 +454,7 @@ private:
   bool m_is_rollback_active = false;
   static constexpr bool ALWAYS_DELAY = false;
   static constexpr int FORCE_ROLLBACK = 0;
+  static constexpr int FORCE_ROLLBACK_FREQ = 1;
   static constexpr size_t MAX_DELAY = 99;
   static constexpr size_t PAD_BUFFER_SIZE = MAX_ROLLBACK_NUM + 1 + MAX_DELAY;  // rollback frames + 1 forward sim frame + 2 delay frames
 
@@ -479,7 +479,12 @@ private:
   void Netsync_PredictInputs();
   u32 Netsync_GetLocalInputNum();
 
-  // Recroding
+  // Input
+  u32 NetPlay_HashPadStatus(GCPadStatus* status);
+  u8 NetPlay_ClampStick(u8 val);
+  u8 NetPlay_ClampTrigger(u8 val);
+
+  // Recording
   void Match_Receive(u8* read_ptr, u32 size);
   void Frame_Receive(u8* read_ptr, u32 size);
   void End_Receive();

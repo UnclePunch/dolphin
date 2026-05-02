@@ -432,8 +432,8 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
     {
       m_confirm_frame = m_forward_frame;
 
-      if (m_forward_frame >= MAX_ROLLBACK_NUM && m_forward_frame % MAX_ROLLBACK_NUM == 0)
-        return MAX_ROLLBACK_NUM + 1;
+      if (m_forward_frame >= FORCE_ROLLBACK_FREQ)
+        return FORCE_ROLLBACK_FREQ + 1;
       else
         return 1;
 
@@ -662,6 +662,24 @@ u32 ExpansionInterface::CEXIStarpole::NetPlay_HashPadStatus(GCPadStatus* status)
   h = h * 131 + status->triggerLeft;
   h = h * 131 + status->triggerRight;
   return h;
+}
+
+u8 ExpansionInterface::CEXIStarpole::NetPlay_ClampStick(u8 val)
+{
+  s8 sval = (s8)val;
+
+  if (sval < 28 && sval > -28)
+    return 0;
+
+  return val;
+}
+
+u8 ExpansionInterface::CEXIStarpole::NetPlay_ClampTrigger(u8 val)
+{
+  if (val < 70)
+    return 0;
+
+  return val;
 }
 
 u32 CEXIStarpole::Netsync_GetLocalInputNum()

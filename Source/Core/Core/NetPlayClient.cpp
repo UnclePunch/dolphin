@@ -3148,12 +3148,12 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
       memset(&m_pad_buffer[arr_idx][i].status, 0, sizeof(m_pad_buffer[arr_idx][i].status));
       m_pad_buffer[arr_idx][i].status = {
           .button = input.status.button,
-          .stickX = input.status.stickX,
-          .stickY = input.status.stickY,
-          .substickX = input.status.substickX,
-          .substickY = input.status.substickY,
-          .triggerLeft = input.status.triggerLeft,
-          .triggerRight = input.status.triggerRight,
+          .stickX = NetPlay_ClampStick(input.status.stickX),
+          .stickY = NetPlay_ClampStick(input.status.stickY),
+          .substickX = NetPlay_ClampStick(input.status.substickX),
+          .substickY = NetPlay_ClampStick(input.status.substickY),
+          .triggerLeft = NetPlay_ClampTrigger(input.status.triggerLeft),
+          .triggerRight = NetPlay_ClampTrigger(input.status.triggerRight),
           .analogA = input.status.analogA,
           .analogB = input.status.analogB,
           .isConnected = input.status.isConnected,
