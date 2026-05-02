@@ -1556,8 +1556,9 @@ void NetPlayClient::OnGameInput(sf::Packet& packet)
     m_game_buffer.at(map).Push(input);
     m_gc_pad_event.Set();
 
-    INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE NetPlay, received {} inputs for player {} 0x{:04X}",
-                 (input.is_rollback) ? "rollback" : "delay", map, input.status.button);
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE NetPlay, received frame {} {} inputs for player {} ({}, {}) 0x{:04X}",
+                  input.frame, (input.is_rollback) ? "rollback" : "delay", map, (s8)input.status.stickX,
+                 (s8)input.status.stickY, input.status.button);
   }
 
 }
@@ -2242,8 +2243,6 @@ bool NetPlayClient::GetPlayerGameInput(int pad_nb, GameInput* input)
 // called from ---CPU--- thread
 bool NetPlayClient::SendGameInput(GCPadStatus* status, u32 frame, bool is_rollback)
 {
-  int local_size = 0;
-
   for (int i = 0; i < 4; i++)
   {
     if (IsFirstInGamePad(i))
@@ -2271,7 +2270,7 @@ bool NetPlayClient::SendGameInput(GCPadStatus* status, u32 frame, bool is_rollba
 
           // add to packet
           AddGameInputToPacket(net_pad, input, packet);
-            send_packet = true;
+          send_packet = true;
         }
         else
         {
@@ -2287,8 +2286,6 @@ bool NetPlayClient::SendGameInput(GCPadStatus* status, u32 frame, bool is_rollba
             send_packet = true;
           }
         }
-
-        local_size = (int)m_game_buffer[net_pad].Size();
       }
 
       if (send_packet)
@@ -2313,6 +2310,7 @@ void NetPlayClient::AddGameInputToPacket(int in_game_pad, const GameInput& input
 {
   packet << static_cast<PadIndex>(in_game_pad);
   packet << input.is_rollback;
+  packet << input.frame;
   packet << input.status.button;
   if (!m_gba_config[in_game_pad].enabled)
   {
@@ -2321,7 +2319,7 @@ void NetPlayClient::AddGameInputToPacket(int in_game_pad, const GameInput& input
            << input.status.triggerLeft << input.status.triggerRight << input.status.isConnected;
   }
 
-  INFO_LOG_FMT(EXPANSIONINTERFACE, " sending to clients: port {} ({}:{}) 0x{:04X}", in_game_pad,
+  INFO_LOG_FMT(EXPANSIONINTERFACE, " sending to clients: frame {} port {} ({}:{}) 0x{:04X}", input.frame, in_game_pad,
                (s8)input.status.stickX,
                (s8)input.status.stickY, input.status.button);
 }
@@ -3071,13 +3069,17 @@ int SerialInterface::CSIDevice_GCController::NetPlay_InGamePadToLocalPad(int num
 bool ExpansionInterface::CEXIStarpole::NetPlay_SendGameInput(GCPadStatus* status)
 {
   // halt sending inputs if we already sent this frame
-  if (Netsync_GetLocalInputNum() >= (m_forward_frame))
+  if (m_inputs_sent > (m_forward_frame + m_input_delay))
     return false;
 
   std::lock_guard lk(NetPlay::crit_netplay_client);
 
-  if (NetPlay::netplay_client)
-    return NetPlay::netplay_client->SendGameInput(status, Netsync_GetLocalInputNum(), m_is_rollback_active);
+  if (NetPlay::netplay_client &&
+      NetPlay::netplay_client->SendGameInput(status, m_inputs_sent, m_is_rollback_active))
+  {
+    m_inputs_sent++;
+    return true;
+  }
 
   return false;
 }
@@ -3091,7 +3093,7 @@ void ExpansionInterface::CEXIStarpole::NetPlay_ClearGameInputs()
 
 }
 
-void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
+void ExpansionInterface::CEXIStarpole::NetPlay_InitData()
 {
   std::lock_guard lk(NetPlay::crit_netplay_client);
 
@@ -3106,18 +3108,21 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
     m_player_pad_map[i] = pad_map[i];
   }
 
+  return;
+}
+
+
+void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
+{
+  std::lock_guard lk(NetPlay::crit_netplay_client);
+
+  if (!NetPlay::netplay_client)
+    return;
+
   // preliminary check to make sure i have inputs for all players
-  if (!m_is_rollback_active)
-  {
-    if (!NetPlay::netplay_client->HasGameInputForAll())
-    {
-      m_is_netpause = true;
+  if (!m_is_rollback_active && !NetPlay::netplay_client->HasGameInputForAll())
       return;
-    }
-    else
-      m_is_netpause = false;
-  }
-  
+
   // check each player
   for (int i = 0; i < 4; i++)
   {
@@ -3130,26 +3135,43 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
 
       int arr_idx = (m_player_input_num[i]) % PAD_BUFFER_SIZE;
 
-      m_pad_buffer[arr_idx][i].status = input.status;
+      // received input for frame we predicted
       if (m_pad_buffer[arr_idx][i].state == STARPOLE_NETPAD_PREDICTED)
+      {
         m_pad_buffer[arr_idx][i].state = STARPOLE_NETPAD_CORRECTED;
+        m_pad_buffer[arr_idx][i].status_predict = m_pad_buffer[arr_idx][i].status;
+      }
       else
         m_pad_buffer[arr_idx][i].state = STARPOLE_NETPAD_VERIFIED;
+
+      // copy input data
+      memset(&m_pad_buffer[arr_idx][i].status, 0, sizeof(m_pad_buffer[arr_idx][i].status));
+      m_pad_buffer[arr_idx][i].status = {
+          .button = input.status.button,
+          .stickX = input.status.stickX,
+          .stickY = input.status.stickY,
+          .substickX = input.status.substickX,
+          .substickY = input.status.substickY,
+          .triggerLeft = input.status.triggerLeft,
+          .triggerRight = input.status.triggerRight,
+          .analogA = input.status.analogA,
+          .analogB = input.status.analogB,
+          .isConnected = input.status.isConnected,
+      };
 
       m_pad_buffer[arr_idx][i].frame = m_player_input_num[i];
 
       // generate input hash
-      u32 h = 0;
-      u8* data = (u8*)&m_pad_buffer[arr_idx][i].status;
-      for (size_t j = 0; j < sizeof(m_pad_buffer[arr_idx][i].status); j++)
-        h = h * 131 + data[j];
-      m_pad_buffer[arr_idx][i].hash_real = h;
+      m_pad_buffer[arr_idx][i].hash_real = NetPlay_HashPadStatus(&m_pad_buffer[arr_idx][i].status);
 
       INFO_LOG_FMT(EXPANSIONINTERFACE,
-                   " drained input: port {} ({}:{}) 0x{:04X} to array_index {}", i,
+                   " drained input: frame {} port {} ({}:{}) 0x{:04X} to array_index {} with hash 0x{:08x}", input.frame, i,
                    (s8)m_pad_buffer[arr_idx][i].status.stickX,
                    (s8)m_pad_buffer[arr_idx][i].status.stickY,
-                   m_pad_buffer[arr_idx][i].status.button, arr_idx);
+                   m_pad_buffer[arr_idx][i].status.button, arr_idx, m_pad_buffer[arr_idx][i].hash_real);
+
+      //INFO_LOG_FMT(EXPANSIONINTERFACE,
+      //             "      hash_real: {:08x}   hash_predict: {:08x}", m_pad_buffer[arr_idx][i].hash_real, m_pad_buffer[arr_idx][i].hash_predict);
 
       m_player_input_num[i]++;
 

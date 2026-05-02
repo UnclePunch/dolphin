@@ -29,6 +29,7 @@ CEXIStarpole::CEXIStarpole(Core::System& system, const std::string& name)
 {
   replay_state = STARPOLE_REPLAYSTATE_NONE;
   SaveState_End();
+  NetPlay_InitData();
 
   INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI Starpole Init");
 }
@@ -458,7 +459,8 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
       }
       else
       {
-        INFO_LOG_FMT(EXPANSIONINTERFACE, "rollback: validating predictions...");
+        INFO_LOG_FMT(EXPANSIONINTERFACE, "prediction: validating from frame {} to {}...",
+                     m_confirm_frame + 1, m_confirm_frame + 1 + input_num);
 
         // we are in a prediction branch and received a past input
         // lets validate the predicted input against the one received and determine if we should rollback
@@ -473,30 +475,71 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
             if (m_player_pad_map[j] == 0)
               continue;
 
+            //INFO_LOG_FMT(EXPANSIONINTERFACE,
+            //             "frame {} ({}) port {}. state {}",
+            //             m_confirm_frame + 1,
+            //             m_pad_buffer [pad_idx][j].frame,
+            //             j,
+            //             (u32)m_pad_buffer[pad_idx][j].state);
+
             // check predicted hash against real hash
-            if (m_pad_buffer[pad_idx][j].state == STARPOLE_NETPAD_CORRECTED &&
-              m_pad_buffer[pad_idx][j].hash_real != m_pad_buffer[pad_idx][j].hash_predict)
+            if (m_pad_buffer[pad_idx][j].state == STARPOLE_NETPAD_CORRECTED)
             {
-              is_all_correct = 0;
-              break;
+
+              INFO_LOG_FMT(EXPANSIONINTERFACE, "prediction: validating frame {} port {}. real {:08x} vs predicted {:08x}",
+                           m_pad_buffer[pad_idx][j].frame, j, m_pad_buffer[pad_idx][j].hash_real,
+                           m_pad_buffer[pad_idx][j].hash_predict);
+              INFO_LOG_FMT(EXPANSIONINTERFACE, "    real: buttons: 0x{:04X} lstick ({:+04d}, {:+04d}) rstick ({:+04d}, {:+04d}) triggers ({:04d}, {:04d}) analog AB ({:04d}, {:04d}) isConnected: {} hash: {:08x}",
+                           m_pad_buffer[pad_idx][j].status.button,
+                           (s8)m_pad_buffer[pad_idx][j].status.stickX,
+                           (s8)m_pad_buffer[pad_idx][j].status.stickY,
+                           (s8)m_pad_buffer[pad_idx][j].status.substickX,
+                           (s8)m_pad_buffer[pad_idx][j].status.substickY,
+                           m_pad_buffer[pad_idx][j].status.triggerLeft,
+                           m_pad_buffer[pad_idx][j].status.triggerRight,
+                           m_pad_buffer[pad_idx][j].status.analogA,
+                           m_pad_buffer[pad_idx][j].status.analogB,
+                           (u8)m_pad_buffer[pad_idx][j].status.isConnected,
+                           m_pad_buffer[pad_idx][j].hash_real);
+              u8* data = (u8*)&m_pad_buffer[pad_idx][j].status;
+              for (size_t cur = 0; cur < sizeof(m_pad_buffer[pad_idx][cur].status); cur++)
+                printf("%02x ", data[cur]);
+              printf("\n");
+
+              INFO_LOG_FMT(EXPANSIONINTERFACE, " predict: buttons: 0x{:04X} lstick ({:+04d}, {:+04d}) rstick ({:+04d}, {:+04d}) triggers ({:04d}, {:04d}) analog AB ({:04d}, {:04d}) isConnected: {} hash: {:08x}",
+                           m_pad_buffer[pad_idx][j].status.button,
+                           (s8)m_pad_buffer[pad_idx][j].status_predict.stickX,
+                           (s8)m_pad_buffer[pad_idx][j].status_predict.stickY,
+                           (s8)m_pad_buffer[pad_idx][j].status_predict.substickX,
+                           (s8)m_pad_buffer[pad_idx][j].status_predict.substickY,
+                           m_pad_buffer[pad_idx][j].status_predict.triggerLeft,
+                           m_pad_buffer[pad_idx][j].status_predict.triggerRight,
+                           m_pad_buffer[pad_idx][j].status_predict.analogA,
+                           m_pad_buffer[pad_idx][j].status_predict.analogB,
+                           (u8)m_pad_buffer[pad_idx][j].status_predict.isConnected,
+                           m_pad_buffer[pad_idx][j].hash_predict);
+              data = (u8*)&m_pad_buffer[pad_idx][j].status_predict;
+              for (size_t cur = 0; cur < sizeof(m_pad_buffer[pad_idx][cur].status_predict); cur++)
+                printf("%02x ", data[cur]);
+              printf("\n");
+
+              if (m_pad_buffer[pad_idx][j].hash_real != m_pad_buffer[pad_idx][j].hash_predict)
+              {
+                is_all_correct = 0;
+                break;
+              }
             }
           }
-
-          // to-do: here i was at max_rollback_frames (frame 8) and i got 1 input (for frame 2) and it was wrong.
-          // currently i rollback to the incorrect frame and simulate rollback_num + 1 but i think i
-          // need to simulate back to the forward_frame + 1?
 
           // prediction was incorrect, rollback to here
           if (!is_all_correct)
           {
+            INFO_LOG_FMT(EXPANSIONINTERFACE, "prediction: frame {} was invalid",
+                         m_confirm_frame + 1 + i);
+
             rollback_num = (m_forward_frame - m_confirm_frame - 1) - i;
-            m_confirm_frame += input_num;
 
-            // lets repredict using the last correct input
-            Netsync_PredictInputs();
-
-            INFO_LOG_FMT(EXPANSIONINTERFACE, "rollback: prediction on frame {} was invalid",
-                         m_confirm_frame + 1);
+            // break out and lets repredict using the last correct input
             break;
           }
         }
@@ -504,11 +547,13 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
         // predicted correctly
         if (rollback_num == 0)
         {
-          m_confirm_frame += input_num;
-
-          INFO_LOG_FMT(EXPANSIONINTERFACE, "rollback: prediction from frames {} to {} were valid!",
-                       m_confirm_frame - input_num, m_confirm_frame);
+          INFO_LOG_FMT(EXPANSIONINTERFACE, "prediction: frames {} to {} were valid!",
+                       m_confirm_frame + 1, m_confirm_frame + 1 + input_num);
         }
+
+        // predict forward if need be
+        m_confirm_frame += input_num;
+        Netsync_PredictInputs();
 
         return rollback_num + 1;
       }
@@ -522,20 +567,22 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
       {
         // we are in a prediction branch
 
-        // we've already predicted the max amount of times, halt simulation until we receive some inputs
+        // we've already predicted the max amount of times, halt simulation until we receive some
+        // inputs
         if ((m_forward_frame - m_confirm_frame) > MAX_ROLLBACK_NUM)
         {
           sim_frames = 0;
 
-          INFO_LOG_FMT(EXPANSIONINTERFACE,
-                       "rollback: input missing. we've predicted the maximum amount of times, will stall...");
+          // INFO_LOG_FMT(EXPANSIONINTERFACE,
+          //              "rollback: input missing. we've predicted the maximum amount of times,
+          //              will stall...");
         }
         else
         {
           sim_frames = 1;
 
-          INFO_LOG_FMT(EXPANSIONINTERFACE,
-                       "rollback: input missing. advancing to prediction #{}", m_forward_frame - m_confirm_frame - 1);
+          INFO_LOG_FMT(EXPANSIONINTERFACE, "rollback: input missing. advancing to prediction #{}",
+                       m_forward_frame - m_confirm_frame - 1);
         }
       }
       else
@@ -543,7 +590,8 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
         // lets branch off to a prediction
         // m_confirm_frame = m_forward_frame;
 
-        INFO_LOG_FMT(EXPANSIONINTERFACE, "rollback: missing inputs, branching off to a prediction!");
+        INFO_LOG_FMT(EXPANSIONINTERFACE,
+                     "rollback: missing inputs, branching off to a prediction!");
 
         sim_frames = 1;
       }
@@ -581,10 +629,15 @@ void CEXIStarpole::Netsync_PredictInputs()
     // use previous inputs for inputs not received
     for (int i = 0; i < 4; i++)
     {
-      // only remote inputs that havent been received
-      if (m_player_pad_map[i] != 0 && m_player_pad_map[i] != m_local_pid &&
-          m_forward_frame >= (m_player_input_num[i]))
+      // only remote inputs
+      if (m_player_pad_map[i] == 0 || m_player_pad_map[i] == m_local_pid)
+        continue;
+
+      if (m_forward_frame >= (m_player_input_num[i]))
       {
+        INFO_LOG_FMT(EXPANSIONINTERFACE, " predicting frame {} port {}!",
+                     this_predict_frame, i);
+
         m_pad_buffer[current_idx][i].status = m_pad_buffer[previous_idx][i].status;
         m_pad_buffer[current_idx][i].frame = this_predict_frame;
         m_pad_buffer[current_idx][i].state = STARPOLE_NETPAD_PREDICTED;
@@ -598,12 +651,25 @@ void CEXIStarpole::Netsync_PredictInputs()
   }
 }
 
+u32 ExpansionInterface::CEXIStarpole::NetPlay_HashPadStatus(GCPadStatus* status)
+{
+  u32 h = 0;
+  h = h * 131 + status->button;
+  h = h * 131 + status->stickX;
+  h = h * 131 + status->stickY;
+  h = h * 131 + status->substickX;
+  h = h * 131 + status->substickY;
+  h = h * 131 + status->triggerLeft;
+  h = h * 131 + status->triggerRight;
+  return h;
+}
+
 u32 CEXIStarpole::Netsync_GetLocalInputNum()
 {
   for (int i = 0; i < 4; i++)
   {
-    if (m_player_pad_map[i] != m_local_pid)
-      return m_player_input_num[i] - m_input_delay;
+    if (m_player_pad_map[i] == m_local_pid)
+      return m_player_input_num[i];
   }
 
   return 0;
@@ -1006,29 +1072,19 @@ void CEXIStarpole::SaveState_Init(DolDataSection* read_ptr, u32 section_num)
   m_savestate_num = 0;
   m_savestate_size = savestate_size;
 
-  m_is_netpause = false;
   m_is_rollback_active = true;
   memset(m_player_input_num, 0, sizeof(m_player_input_num));
   memset(m_pad_buffer, 0, sizeof(m_pad_buffer));
   m_confirm_frame = -1;
   m_forward_frame = 0;
+  m_inputs_sent = 0;
 
-  // initialize delay inputs
+  // send delay inputs
   for (int i = 0; i < m_input_delay; i++)
   {
-    int arr_idx = (i + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
-    for (int j = 0; j < 4; j++)
-    {
-      m_pad_buffer[arr_idx][j] = {
-          .status = {0},
-          .state = STARPOLE_NETPAD_VERIFIED,
-          .frame = (u32)(i),
-          .hash_real = 0,
-          .hash_predict = 0,
-      };
-
-      m_player_input_num[j]++;
-    }
+    GCPadStatus pad[4];
+    memset(pad, 0, sizeof(pad));
+    NetPlay_SendGameInput(pad);
   }
 
   // NetPlay_ClearGameInputs();
@@ -1042,8 +1098,8 @@ void CEXIStarpole::SaveState_End()
   m_savestate_idx = 0;
   m_savestate_num = 0;
   m_savestate_size = 0;
+  m_inputs_sent = 0;
 
-  m_is_netpause = false;
   m_is_rollback_active = false;
   memset(m_player_input_num, 0, sizeof(m_player_input_num));
   memset(m_pad_buffer, 0, sizeof(m_pad_buffer));

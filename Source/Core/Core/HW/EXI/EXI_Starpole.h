@@ -318,6 +318,7 @@ typedef struct
 struct NetPad
 {
   GCPadStatus status;
+  GCPadStatus status_predict;
   StarpoleNetPadKind kind;
   StarpoleNetPadState state;
   u32 frame;
@@ -435,7 +436,9 @@ public:
 
   bool NetPlay_SendGameInput(GCPadStatus* status);
   void NetPlay_ClearGameInputs();
+  void NetPlay_InitData();
   void NetPlay_DrainPadQueue();
+  u32 NetPlay_HashPadStatus(GCPadStatus* status);
   u32 NetPlay_GetGameRNG();
 
   bool CheckActive();
@@ -450,7 +453,6 @@ private:
   u32 m_req_load = 0;
   size_t m_savestate_size;
   bool m_is_rollback_active = false;
-  bool m_is_netpause;
   static constexpr bool ALWAYS_DELAY = false;
   static constexpr int FORCE_ROLLBACK = 0;
   static constexpr size_t MAX_DELAY = 99;
@@ -464,6 +466,7 @@ private:
   int m_sim_frames = 0;                           // how many frames the game should simulate this tick
   u32 m_confirm_frame;                            // used to know when we are in a prediction
   u32 m_forward_frame;                            // used for keeping track of the next forward simulation frame
+  u32 m_inputs_sent;
 
   void TransferByte(u8& byte) override;
 
