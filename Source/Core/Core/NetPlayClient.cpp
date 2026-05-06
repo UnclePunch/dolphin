@@ -2296,15 +2296,6 @@ bool NetPlayClient::SendGameInput(GCPadStatus* status, u32 frame, bool is_rollba
   }
   return true;
 }
-void NetPlayClient::ClearGameInputs()
-{
-  for (int i = 0; i < 4; i++)
-  {
-    while (m_game_buffer[i].Size() > 0)
-      m_game_buffer[i].Pop();
-  }
-  return;
-}
 
 void NetPlayClient::AddGameInputToPacket(int in_game_pad, const GameInput& input, sf::Packet& packet)
 {
@@ -3084,15 +3075,6 @@ bool ExpansionInterface::CEXIStarpole::NetPlay_SendGameInput(GCPadStatus* status
   return false;
 }
 
-void ExpansionInterface::CEXIStarpole::NetPlay_ClearGameInputs()
-{
-  std::lock_guard lk(NetPlay::crit_netplay_client);
-
-  if (NetPlay::netplay_client)
-    NetPlay::netplay_client->ClearGameInputs();
-
-}
-
 void ExpansionInterface::CEXIStarpole::NetPlay_InitData()
 {
   std::lock_guard lk(NetPlay::crit_netplay_client);
@@ -3110,7 +3092,6 @@ void ExpansionInterface::CEXIStarpole::NetPlay_InitData()
 
   return;
 }
-
 
 void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
 {

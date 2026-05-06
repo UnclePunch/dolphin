@@ -209,6 +209,7 @@ typedef enum
   STARPOLE_CMD_NETSAVE,
   STARPOLE_CMD_NETPADSEND,
   STARPOLE_CMD_NETPADRECV,
+  STARPOLE_CMD_NETGETCONFIRM,
   STARPOLE_CMD_NETEND,
 
   // end
@@ -435,7 +436,6 @@ public:
   void SetReplay(std::string);
 
   bool NetPlay_SendGameInput(GCPadStatus* status);
-  void NetPlay_ClearGameInputs();
   void NetPlay_InitData();
   void NetPlay_DrainPadQueue();
   u32 NetPlay_GetGameRNG();
@@ -453,8 +453,8 @@ private:
   size_t m_savestate_size;
   bool m_is_rollback_active = false;
   static constexpr bool ALWAYS_DELAY = false;
-  static constexpr int FORCE_ROLLBACK = 0;
-  static constexpr int FORCE_ROLLBACK_FREQ = 1;
+  static constexpr bool FORCE_ROLLBACK = false;
+  static constexpr float SPOOF_PING_MS = 53;
   static constexpr size_t MAX_DELAY = 99;
   static constexpr size_t PAD_BUFFER_SIZE = MAX_ROLLBACK_NUM + 1 + MAX_DELAY;  // rollback frames + 1 forward sim frame + 2 delay frames
 
@@ -467,6 +467,7 @@ private:
   u32 m_confirm_frame;                            // used to know when we are in a prediction
   u32 m_forward_frame;                            // used for keeping track of the next forward simulation frame
   u32 m_inputs_sent;
+  u32 m_global_timer;
 
   void TransferByte(u8& byte) override;
 

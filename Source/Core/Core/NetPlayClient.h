@@ -144,7 +144,6 @@ public:
   bool WiimoteUpdate(const std::span<WiimoteDataBatchEntry>& entries);
   bool GetNetPads(int pad_nb, bool from_vi, GCPadStatus* pad_status);
   bool SendGameInput(GCPadStatus* status, u32 frame, bool is_rollback);
-  void ClearGameInputs();
   bool GetPlayerGameInput(int pad_nb, GameInput* input);
   bool HasGameInputForAll();
   bool GetGameInput(GameInput* input);

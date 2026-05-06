@@ -30,6 +30,7 @@ CEXIStarpole::CEXIStarpole(Core::System& system, const std::string& name)
   replay_state = STARPOLE_REPLAYSTATE_NONE;
   SaveState_End();
   NetPlay_InitData();
+  m_global_timer = 0;
 
   INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI Starpole Init");
 }
@@ -138,6 +139,8 @@ u32 CEXIStarpole::ImmRead(u32 size)
 
   case STARPOLE_CMD_NETPADRECV:   // game is requesting inputs
 
+    m_global_timer++;
+
     // check for remote inputs, copy them to our pad buffer and update
     NetPlay_DrainPadQueue();
 
@@ -173,6 +176,10 @@ u32 CEXIStarpole::ImmRead(u32 size)
     }
     response = 1;
 
+    break;
+
+  case STARPOLE_CMD_NETGETCONFIRM:
+    response = m_confirm_frame;
     break;
 
   case STARPOLE_CMD_NETEND:
@@ -432,8 +439,8 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
     {
       m_confirm_frame = m_forward_frame;
 
-      if (m_forward_frame >= FORCE_ROLLBACK_FREQ)
-        return FORCE_ROLLBACK_FREQ + 1;
+      if (m_forward_frame >= (MAX_ROLLBACK_NUM) && m_forward_frame % MAX_ROLLBACK_NUM == 0)
+        return MAX_ROLLBACK_NUM + 1;
       else
         return 1;
 
@@ -445,6 +452,18 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
     int input_num = Netsync_GetConfirmedInputNum();
 
     // INFO_LOG_FMT(EXPANSIONINTERFACE, "rollback: input_num {}", input_num);
+
+    //// spoof some rollbacks
+    //if (SPOOF_PING_MS > 0)
+    //{
+    //  int modulo_val = (int)((float)SPOOF_PING_MS / 16.667f) + 1 + 1;
+    //  float cur_time = (m_global_timer % modulo_val) * 16.6667;
+    //  if (cur_time > SPOOF_PING_MS)
+    //  {
+    //    INFO_LOG_FMT(EXPANSIONINTERFACE, "spoofing {} rollbacks!", modulo_val - 1);
+    //    return modulo_val;
+    //  }
+    //}
 
     if (input_num > 0)
     {
@@ -507,7 +526,7 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
               printf("\n");
 
               INFO_LOG_FMT(EXPANSIONINTERFACE, " predict: buttons: 0x{:04X} lstick ({:+04d}, {:+04d}) rstick ({:+04d}, {:+04d}) triggers ({:04d}, {:04d}) analog AB ({:04d}, {:04d}) isConnected: {} hash: {:08x}",
-                           m_pad_buffer[pad_idx][j].status.button,
+                           m_pad_buffer[pad_idx][j].status_predict.button,
                            (s8)m_pad_buffer[pad_idx][j].status_predict.stickX,
                            (s8)m_pad_buffer[pad_idx][j].status_predict.stickY,
                            (s8)m_pad_buffer[pad_idx][j].status_predict.substickX,
@@ -1104,8 +1123,6 @@ void CEXIStarpole::SaveState_Init(DolDataSection* read_ptr, u32 section_num)
     memset(pad, 0, sizeof(pad));
     NetPlay_SendGameInput(pad);
   }
-
-  // NetPlay_ClearGameInputs();
 }
 
 void CEXIStarpole::SaveState_End()
@@ -1123,8 +1140,6 @@ void CEXIStarpole::SaveState_End()
   memset(m_pad_buffer, 0, sizeof(m_pad_buffer));
   m_confirm_frame = -1;
   m_forward_frame = 0;
-
-  // NetPlay_ClearGameInputs();
 }
 
 SavestateHeader* CEXIStarpole::SaveState_Get(u32 frame_idx)
