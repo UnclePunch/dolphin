@@ -3101,8 +3101,8 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
     return;
 
   // preliminary check to make sure i have inputs for all players
-  if (!m_is_rollback_active && !NetPlay::netplay_client->HasGameInputForAll())
-      return;
+  //if (!m_is_rollback_active && !NetPlay::netplay_client->HasGameInputForAll())
+  //    return;
 
   // check each player
   for (int i = 0; i < 4; i++)
@@ -3112,7 +3112,10 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
     {
       // discard inputs from a different mode
       if (input.is_rollback != m_is_rollback_active)
+      {
+        INFO_LOG_FMT(EXPANSIONINTERFACE, " discarding drained input from non-matching mode");
         continue;
+      }
 
       int arr_idx = (m_player_input_num[i]) % PAD_BUFFER_SIZE;
 
