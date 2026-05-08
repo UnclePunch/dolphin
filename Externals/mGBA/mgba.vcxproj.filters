@@ -238,9 +238,6 @@
     <ClCompile Include="mgba\src\gba\sio\gbp.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="mgba\src\gba\sio\joybus.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="mgba\src\gba\timer.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -283,9 +280,6 @@
     <ClCompile Include="mgba\src\util\elf-read.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="mgba\src\util\export.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="mgba\src\util\patch.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -296,9 +290,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="mgba\src\util\patch-ups.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="mgba\src\util\png-io.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="mgba\src\util\ring-fifo.c">
@@ -329,9 +320,6 @@
       <Filter>Windows-specific code</Filter>
     </ClCompile>
     <ClCompile Include="mgba\src\third-party\inih\ini.c">
-      <Filter>Third-party code</Filter>
-    </ClCompile>
-    <ClCompile Include="mgba\src\third-party\blip_buf\blip_buf.c">
       <Filter>Third-party code</Filter>
     </ClCompile>
     <ClCompile Include="mgba\src\util\vfs\vfs-lzma.c">
@@ -406,9 +394,6 @@
     <ClCompile Include="mgba\src\gb\sio\printer.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="mgba\src\gba\extra\audio-mixer.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="mgba\src\gba\extra\battlechip.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -430,6 +415,17 @@
     <ClCompile Include="mgba\src\feature\video-logger.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="mgba\src\gba\cart\unlicensed.c" />
+    <ClCompile Include="mgba\src\util\audio-buffer.c" />
+    <ClCompile Include="mgba\src\util\audio-resampler.c" />
+    <ClCompile Include="mgba\src\util\geometry.c" />
+    <ClCompile Include="mgba\src\util\image.c" />
+    <ClCompile Include="mgba\src\util\interpolator.c" />
+    <ClCompile Include="mgba\src\util\md5.c" />
+    <ClCompile Include="mgba\src\util\sha1.c" />
+    <ClCompile Include="mgba\src\util\image\export.c" />
+    <ClCompile Include="mgba\src\util\image\png-io.c" />
+    <ClCompile Include="mgba\src\feature\video-backend.c" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Generated sources">

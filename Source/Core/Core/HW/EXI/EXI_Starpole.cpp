@@ -31,6 +31,7 @@ CEXIStarpole::CEXIStarpole(Core::System& system, const std::string& name)
   SaveState_End();
   NetPlay_InitData();
   m_global_timer = 0;
+  m_instance_idx = 0;
 
   INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI Starpole Init");
 }
@@ -385,6 +386,28 @@ void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
                    local_status[i][j].button, arr_idx);
     }
   }
+}
+
+void CEXIStarpole::Netsync_Init(u32 input_delay)
+{
+  m_input_delay = input_delay;
+  memset(m_player_input_num, 0, sizeof(m_player_input_num));
+  memset(m_pad_buffer, 0, sizeof(m_pad_buffer));
+  m_confirm_frame = -1;
+  m_forward_frame = 0;
+  m_inputs_sent = 0;
+  m_instance_idx++;
+
+  // send delay inputs
+  for (int i = 0; i < m_input_delay; i++)
+  {
+    GCPadStatus pad[4];
+    memset(pad, 0, sizeof(pad));
+    NetPlay_SendGameInput(pad);
+  }
+
+  // pull in queued inputs we may have received in the previous instance
+
 }
 
 //int CEXIStarpole::Netsync_CheckLockstepAdvance()
@@ -1104,42 +1127,25 @@ void CEXIStarpole::SaveState_Init(DolDataSection* read_ptr, u32 section_num)
     }
   }
 
-  m_input_delay = 2;
   m_savestate_idx = 0;
   m_savestate_num = 0;
   m_savestate_size = savestate_size;
 
   m_is_rollback_active = true;
-  memset(m_player_input_num, 0, sizeof(m_player_input_num));
-  memset(m_pad_buffer, 0, sizeof(m_pad_buffer));
-  m_confirm_frame = -1;
-  m_forward_frame = 0;
-  m_inputs_sent = 0;
+  Netsync_Init(2);
 
-  // send delay inputs
-  for (int i = 0; i < m_input_delay; i++)
-  {
-    GCPadStatus pad[4];
-    memset(pad, 0, sizeof(pad));
-    NetPlay_SendGameInput(pad);
-  }
 }
 
 void CEXIStarpole::SaveState_End()
 {
   m_savestate_alloc.reset();        // streets are saying this is safe to call on a nullptr
 
-  m_input_delay = 0;
   m_savestate_idx = 0;
   m_savestate_num = 0;
   m_savestate_size = 0;
-  m_inputs_sent = 0;
 
   m_is_rollback_active = false;
-  memset(m_player_input_num, 0, sizeof(m_player_input_num));
-  memset(m_pad_buffer, 0, sizeof(m_pad_buffer));
-  m_confirm_frame = -1;
-  m_forward_frame = 0;
+  Netsync_Init(0);
 }
 
 SavestateHeader* CEXIStarpole::SaveState_Get(u32 frame_idx)

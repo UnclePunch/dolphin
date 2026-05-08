@@ -1997,6 +1997,9 @@ void NetPlayClient::ClearBuffers()
     while (m_pad_buffer[i].Size())
       m_pad_buffer[i].Pop();
 
+    while (m_game_buffer[i].Size())
+      m_game_buffer[i].Pop();
+
     while (m_wiimote_buffer[i].Size())
       m_wiimote_buffer[i].Pop();
   }
@@ -3107,13 +3110,27 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
   // check each player
   for (int i = 0; i < 4; i++)
   {
+    // dont drain inputs beyond forward_frame in delay based
+    if (!m_is_rollback_active && m_player_input_num[i] > m_forward_frame)
+      continue;
+
     NetPlay::GameInput input;
     while (NetPlay::netplay_client->GetPlayerGameInput(i, &input))
     {
+      // first check queued inputs that may have been drained while we were in the previous instance
+      // then check the net queue
+
       // discard inputs from a different mode
-      if (input.is_rollback != m_is_rollback_active)
+      if (input.instance_idx > m_instance_idx)
       {
-        INFO_LOG_FMT(EXPANSIONINTERFACE, " discarding drained input from non-matching mode");
+        INFO_LOG_FMT(EXPANSIONINTERFACE, " queuing drained input from future instance {}",
+                     input.instance_idx);
+        m_game_queue[i].Push(input);
+        continue;
+      }
+      else if (input.instance_idx < m_instance_idx)
+      {
+        INFO_LOG_FMT(EXPANSIONINTERFACE, " discarding drained input from previous instance {}", input.instance_idx);
         continue;
       }
 

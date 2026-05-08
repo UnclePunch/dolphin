@@ -262,6 +262,7 @@ struct GameInput
 {
   GCPadStatus status;
   bool is_rollback;
+  u32 instance_idx;
   u32 frame;
 };
 

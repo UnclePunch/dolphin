@@ -10,7 +10,8 @@
 #include "Common/Swap.h"
 
 #include "Core/HW/EXI/EXI_Device.h"
-#include "Core/PowerPC/PowerPC.h"     // 
+#include "Core/PowerPC/PowerPC.h"     //
+#include "Core/NetPlayProto.h"
 
 #include "InputCommon/GCPadStatus.h"
 
@@ -320,7 +321,7 @@ struct NetPad
 {
   GCPadStatus status;
   GCPadStatus status_predict;
-  StarpoleNetPadKind kind;
+  u32 instance_idx;
   StarpoleNetPadState state;
   u32 frame;
   u32 hash_real;
@@ -451,6 +452,7 @@ private:
   u32 m_savestate_num = 0;
   u32 m_req_load = 0;
   size_t m_savestate_size;
+  u32 m_instance_idx;
   bool m_is_rollback_active = false;
   static constexpr bool ALWAYS_DELAY = false;
   static constexpr bool FORCE_ROLLBACK = false;
@@ -460,6 +462,7 @@ private:
 
   int m_local_pid;
   int m_input_delay;
+  std::array<Common::SPSCQueue<NetPlay::GameInput>, 4> m_game_queue;
   NetPad m_pad_buffer[PAD_BUFFER_SIZE][4] = {0};  // 
   u32 m_player_input_num[4] = {0};                 // how many frames of inputs we've received per player
   u8 m_player_pad_map[4] = {0};                   // which ports are present
@@ -475,6 +478,7 @@ private:
   void Dolphin_SendInfo(u8* write_ptr);
   void Netsync_ReceiveInputs(u8* read_ptr, u32 size);
   void Netsync_SendInputs(u8* write_ptr);
+  void Netsync_Init(u32 input_delay);
   int Netsync_GetConfirmedInputNum();
   int Netsync_GetSimulationFrames();
   void Netsync_PredictInputs();
