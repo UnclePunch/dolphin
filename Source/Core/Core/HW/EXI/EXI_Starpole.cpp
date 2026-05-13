@@ -30,8 +30,13 @@ CEXIStarpole::CEXIStarpole(Core::System& system, const std::string& name)
   replay_state = STARPOLE_REPLAYSTATE_NONE;
   SaveState_End();
   NetPlay_InitData();
+
   m_global_timer = 0;
   m_instance_idx = 0;
+  m_instance_read_start = 0;
+
+  memset(m_player_input_num, 0, sizeof(m_player_input_num));
+  memset(m_pad_buffer, -1, sizeof(m_pad_buffer));
 
   INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI Starpole Init");
 }
@@ -51,6 +56,7 @@ void CEXIStarpole::DoState(PointerWrap& p)
   p.Do(m_savestate_num);
   p.DoArray(m_pad_buffer, sizeof(m_pad_buffer));
   p.DoArray(m_player_input_num, sizeof(m_player_input_num));
+  p.DoArray(m_player_drain_num, sizeof(m_player_drain_num));
   p.Do(m_sim_frames);
   p.Do(m_confirm_frame);
   p.Do(m_forward_frame);
@@ -366,13 +372,14 @@ void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
     return;
 
   GCPadStatus(*local_status)[4] = (GCPadStatus(*)[4])write_ptr;
-  int read_frame = m_forward_frame - m_sim_frames;
+  int read_frame = m_instance_read_start + (m_forward_frame - m_sim_frames);
 
   INFO_LOG_FMT(EXPANSIONINTERFACE, "sending to game:");
   
   for (int i = 0; i < m_sim_frames; i++)
   {
     int arr_idx = ((read_frame + i) + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
+    int cur_frame = (m_forward_frame - m_sim_frames) + i;
 
     for (int j = 0; j < 4; j++)
     {
@@ -381,8 +388,8 @@ void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
 
       memcpy(&local_status[i][j], &m_pad_buffer[arr_idx][j].status, sizeof(GCPadStatus));
 
-      INFO_LOG_FMT(EXPANSIONINTERFACE, "frame {} port {} ({}:{}) 0x{:04X} (arr_idx {})",
-                   read_frame + i, j, (s8)local_status[i][j].stickX, (s8)local_status[i][j].stickY,
+      INFO_LOG_FMT(EXPANSIONINTERFACE, "frame {} port {} ({}:{}) 0x{:04X} (arr_idx {})", cur_frame,
+                   j, (s8)local_status[i][j].stickX, (s8)local_status[i][j].stickY,
                    local_status[i][j].button, arr_idx);
     }
   }
@@ -391,8 +398,21 @@ void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
 void CEXIStarpole::Netsync_Init(u32 input_delay)
 {
   m_input_delay = input_delay;
-  memset(m_player_input_num, 0, sizeof(m_player_input_num));
-  memset(m_pad_buffer, 0, sizeof(m_pad_buffer));
+
+  for (int i = 0; i < 4; i++)
+  {
+    if (m_player_pad_map[i] == m_local_pid)
+    {
+      m_instance_read_start = m_player_drain_num[i];
+      INFO_LOG_FMT(EXPANSIONINTERFACE, "setting read_start to {}", m_instance_read_start);
+
+      break;
+    }
+  }
+
+  memset(m_player_drain_num, 0, sizeof(m_player_drain_num));
+  // memset(m_player_input_num, 0, sizeof(m_player_input_num));
+  // memset(m_pad_buffer, 0, sizeof(m_pad_buffer));
   m_confirm_frame = -1;
   m_forward_frame = 0;
   m_inputs_sent = 0;
@@ -410,43 +430,37 @@ void CEXIStarpole::Netsync_Init(u32 input_delay)
 
 }
 
-//int CEXIStarpole::Netsync_CheckLockstepAdvance()
-//{
-//  int arr_idx = (m_confirm_frame + i + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
-//  for (int j = 0; j < 4; j++)
-//  {
-//    if (m_player_pad_map[j] == 0)
-//      continue;
-//
-//    if (m_pad_buffer[arr_idx][j].state != STARPOLE_NETPAD_VERIFIED)
-//      return input_num;
-//  }
-//  input_num++;
-//
-//  return input_num;
-//}
-
 int CEXIStarpole::Netsync_GetConfirmedInputNum()
 {
   // need a function to check all inputs from m_last_confirm_idx to (head-1)
   int input_num = 0;
   int frames_ahead = m_forward_frame - m_confirm_frame;
-  int read_frame = m_confirm_frame + 1;
+  int read_frame = m_instance_read_start + (m_confirm_frame + 1);
 
   for (int i = 0; i < frames_ahead; i++)
   {
     int arr_idx = (read_frame + i + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
+    bool frame_ready = true;
+
     for (int j = 0; j < 4; j++)
     {
       if (m_player_pad_map[j] == 0)
         continue;
 
-      if (m_pad_buffer[arr_idx][j].frame == (u32)(read_frame + i) &&        // input is for this frame
-          m_pad_buffer[arr_idx][j].state >= STARPOLE_NETPAD_CORRECTED)      // input is confirmed
-        continue;
+      bool is_player_frame_ready =
+          (m_pad_buffer[arr_idx][j].frame == (u32)(m_confirm_frame + 1 + i) &&  // input is for this frame
+           m_pad_buffer[arr_idx][j].state >= STARPOLE_NETPAD_CORRECTED);         // input is confirmed
 
-      return input_num;
+      if (!is_player_frame_ready)
+      {
+        frame_ready = false;
+        break;
+      }
     }
+
+    if (!frame_ready)
+      break;
+
     input_num++;
   }
 
@@ -474,20 +488,6 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
     // check if we have all player inputs (by calling a starpole function that checks is_received on all ports)
     int input_num = Netsync_GetConfirmedInputNum();
 
-    // INFO_LOG_FMT(EXPANSIONINTERFACE, "rollback: input_num {}", input_num);
-
-    //// spoof some rollbacks
-    //if (SPOOF_PING_MS > 0)
-    //{
-    //  int modulo_val = (int)((float)SPOOF_PING_MS / 16.667f) + 1 + 1;
-    //  float cur_time = (m_global_timer % modulo_val) * 16.6667;
-    //  if (cur_time > SPOOF_PING_MS)
-    //  {
-    //    INFO_LOG_FMT(EXPANSIONINTERFACE, "spoofing {} rollbacks!", modulo_val - 1);
-    //    return modulo_val;
-    //  }
-    //}
-
     if (input_num > 0)
     {
       if (!is_predicting)
@@ -509,7 +509,7 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
         int rollback_num = 0;
         for (int i = 0; i < input_num; i++)
         {
-          int pad_idx = (m_confirm_frame + 1 + i + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
+          int pad_idx = (m_instance_read_start + m_confirm_frame + 1 + i + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
 
           int is_all_correct = 1;
           for (int j = 0; j < 4; j++)
@@ -593,8 +593,10 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
                        m_confirm_frame + 1, m_confirm_frame + 1 + input_num);
         }
 
-        // predict forward if need be
         m_confirm_frame += input_num;
+        INFO_LOG_FMT(EXPANSIONINTERFACE, " advancing m_confirm_frame to {}", m_confirm_frame);
+
+        // predict forward if need be
         Netsync_PredictInputs();
 
         return rollback_num + 1;
@@ -604,6 +606,9 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
     {
       // we're missing their input
       int sim_frames = 0;
+
+      if (!ROLLBACK_ENABLE)
+        return sim_frames;
 
       if (is_predicting)
       {
@@ -632,10 +637,25 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
         // lets branch off to a prediction
         // m_confirm_frame = m_forward_frame;
 
-        INFO_LOG_FMT(EXPANSIONINTERFACE,
-                     "rollback: missing inputs, branching off to a prediction!");
+        // before we predict lets make sure we have at least one input to use
+        int is_received_one_frame = 1;
+        for (int i = 0; i < 4; i++)
+        {
+          if (m_player_pad_map[i] != 0 &&
+              m_player_drain_num [i] == 0)
+          {
+            is_received_one_frame = 0;
+            break;
+          }
+        }
 
-        sim_frames = 1;
+        if (is_received_one_frame)
+        {
+          INFO_LOG_FMT(EXPANSIONINTERFACE,
+                       "rollback: missing inputs, branching off to a prediction!");
+
+          sim_frames = 1;
+        }
       }
 
       // predict missing inputs
@@ -665,8 +685,8 @@ void CEXIStarpole::Netsync_PredictInputs()
 {
   for (u32 this_predict_frame = m_confirm_frame + 1; this_predict_frame <= m_forward_frame; this_predict_frame++)
   {
-    int current_idx = (this_predict_frame + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
-    int previous_idx = (this_predict_frame - 1 + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
+    int current_idx = (m_instance_read_start + this_predict_frame + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
+    int previous_idx = (m_instance_read_start +this_predict_frame - 1 + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
 
     // use previous inputs for inputs not received
     for (int i = 0; i < 4; i++)
@@ -675,7 +695,7 @@ void CEXIStarpole::Netsync_PredictInputs()
       if (m_player_pad_map[i] == 0 || m_player_pad_map[i] == m_local_pid)
         continue;
 
-      if (m_forward_frame >= (m_player_input_num[i]))
+      if (m_forward_frame >= (m_player_drain_num[i])) // we are missing the input we need
       {
         INFO_LOG_FMT(EXPANSIONINTERFACE, " predicting frame {} port {}!",
                      this_predict_frame, i);

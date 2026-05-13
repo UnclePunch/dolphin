@@ -445,6 +445,7 @@ public:
 
 private:
   // rollback
+  static constexpr bool ROLLBACK_ENABLE = true;
   static constexpr size_t MAX_ROLLBACK_NUM = 5;
   static constexpr size_t MAX_SAVESTATES = MAX_ROLLBACK_NUM;
   std::unique_ptr<u8[]> m_savestate_alloc;
@@ -452,7 +453,6 @@ private:
   u32 m_savestate_num = 0;
   u32 m_req_load = 0;
   size_t m_savestate_size;
-  u32 m_instance_idx;
   bool m_is_rollback_active = false;
   static constexpr bool ALWAYS_DELAY = false;
   static constexpr bool FORCE_ROLLBACK = false;
@@ -464,13 +464,16 @@ private:
   int m_input_delay;
   std::array<Common::SPSCQueue<NetPlay::GameInput>, 4> m_game_queue;
   NetPad m_pad_buffer[PAD_BUFFER_SIZE][4] = {0};  // 
-  u32 m_player_input_num[4] = {0};                 // how many frames of inputs we've received per player
+  u32 m_player_drain_num[4] = {0};                 // how many frames of inputs we've drained per player this instance
+  u32 m_player_input_num[4] = {0};                 // total number frames of inputs we've received per player across the whole session, used for accessing the circular array
   u8 m_player_pad_map[4] = {0};                   // which ports are present
   int m_sim_frames = 0;                           // how many frames the game should simulate this tick
   u32 m_confirm_frame;                            // used to know when we are in a prediction
   u32 m_forward_frame;                            // used for keeping track of the next forward simulation frame
   u32 m_inputs_sent;
   u32 m_global_timer;
+  u32 m_instance_idx;
+  u32 m_instance_read_start;
 
   void TransferByte(u8& byte) override;
 

@@ -1546,6 +1546,7 @@ void NetPlayClient::OnGameInput(sf::Packet& packet)
 
     packet >> input.is_rollback;
     packet >> input.frame;
+    packet >> input.instance_idx;
     packet >> input.status.button;
     packet >> input.status.analogA >> input.status.analogB >> input.status.stickX >>
         input.status.stickY >> input.status.substickX >> input.status.substickY >>
@@ -2244,7 +2245,7 @@ bool NetPlayClient::GetPlayerGameInput(int pad_nb, GameInput* input)
 }
 
 // called from ---CPU--- thread
-bool NetPlayClient::SendGameInput(GCPadStatus* status, u32 frame, bool is_rollback)
+bool NetPlayClient::SendGameInput(GCPadStatus* status, u32 frame, u32 instance_idx, bool is_rollback)
 {
   for (int i = 0; i < 4; i++)
   {
@@ -2262,6 +2263,7 @@ bool NetPlayClient::SendGameInput(GCPadStatus* status, u32 frame, bool is_rollba
         GameInput input;
         input.is_rollback = is_rollback;
         input.frame = frame;
+        input.instance_idx = instance_idx;
         input.status = status[local_pad];
 
         if (is_rollback)
@@ -2305,6 +2307,7 @@ void NetPlayClient::AddGameInputToPacket(int in_game_pad, const GameInput& input
   packet << static_cast<PadIndex>(in_game_pad);
   packet << input.is_rollback;
   packet << input.frame;
+  packet << input.instance_idx;
   packet << input.status.button;
   if (!m_gba_config[in_game_pad].enabled)
   {
@@ -3069,7 +3072,7 @@ bool ExpansionInterface::CEXIStarpole::NetPlay_SendGameInput(GCPadStatus* status
   std::lock_guard lk(NetPlay::crit_netplay_client);
 
   if (NetPlay::netplay_client &&
-      NetPlay::netplay_client->SendGameInput(status, m_inputs_sent, m_is_rollback_active))
+      NetPlay::netplay_client->SendGameInput(status, m_inputs_sent, m_instance_idx, m_is_rollback_active))
   {
     m_inputs_sent++;
     return true;
@@ -3111,7 +3114,7 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
   for (int i = 0; i < 4; i++)
   {
     // dont drain inputs beyond forward_frame in delay based
-    if (!m_is_rollback_active && m_player_input_num[i] > m_forward_frame)
+    if (!m_is_rollback_active && m_player_drain_num[i] > m_forward_frame)
       continue;
 
     NetPlay::GameInput input;
@@ -3120,21 +3123,16 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
       // first check queued inputs that may have been drained while we were in the previous instance
       // then check the net queue
 
-      // discard inputs from a different mode
-      if (input.instance_idx > m_instance_idx)
+      // discard inputs from a previous instance
+      if (input.instance_idx < m_instance_idx)
       {
-        INFO_LOG_FMT(EXPANSIONINTERFACE, " queuing drained input from future instance {}",
-                     input.instance_idx);
-        m_game_queue[i].Push(input);
-        continue;
-      }
-      else if (input.instance_idx < m_instance_idx)
-      {
-        INFO_LOG_FMT(EXPANSIONINTERFACE, " discarding drained input from previous instance {}", input.instance_idx);
+        INFO_LOG_FMT(EXPANSIONINTERFACE,
+                     " discarding drained input port {} frame {} from previous instance {}", i,
+                     input.frame, input.instance_idx);
         continue;
       }
 
-      int arr_idx = (m_player_input_num[i]) % PAD_BUFFER_SIZE;
+      int arr_idx = (m_instance_read_start + m_player_drain_num[i]) % PAD_BUFFER_SIZE;
 
       // received input for frame we predicted
       if (m_pad_buffer[arr_idx][i].state == STARPOLE_NETPAD_PREDICTED)
@@ -3160,7 +3158,7 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
           .isConnected = input.status.isConnected,
       };
 
-      m_pad_buffer[arr_idx][i].frame = m_player_input_num[i];
+      m_pad_buffer[arr_idx][i].frame = m_player_drain_num[i];
 
       // generate input hash
       m_pad_buffer[arr_idx][i].hash_real = NetPlay_HashPadStatus(&m_pad_buffer[arr_idx][i].status);
@@ -3175,6 +3173,7 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
       //             "      hash_real: {:08x}   hash_predict: {:08x}", m_pad_buffer[arr_idx][i].hash_real, m_pad_buffer[arr_idx][i].hash_predict);
 
       m_player_input_num[i]++;
+      m_player_drain_num[i]++;
 
       // only grab one 
       if (!m_is_rollback_active)
