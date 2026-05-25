@@ -27,15 +27,14 @@
 // big endian conversion
 struct be_u32
 {
-  u32 val;  // stored big-endian
+  u32 val;  // stored big endian
 
-  // Default constructor
   be_u32() : val(0) {}
 
-  // Construct from host uint32
+  // construct from host uint32
   explicit be_u32(u32 host_val) { FromHost(host_val); }
 
-  // Convert stored big-endian to host
+  // convert stored big endian to host
   u32 ToHost() const
   {
 #if defined(_MSC_VER)
@@ -45,7 +44,7 @@ struct be_u32
 #endif
   }
 
-  // Store host value in big-endian format
+  // store host value in big endian format
   void FromHost(u32 host_val)
   {
 #if defined(_MSC_VER)
@@ -55,12 +54,12 @@ struct be_u32
 #endif
   }
 
-  // Static helper: construct from host value
+  // construct from host value
   static be_u32 FromHostValue(u32 host_val) { return be_u32(host_val); }
 };
 struct be_s32
 {
-  s32 val;  // stored big-endian
+  s32 val;  // stored big endian
 
   be_s32() : val(0) {}
 
@@ -463,9 +462,11 @@ private:
   int m_local_pid;
   int m_input_delay;
   std::array<Common::SPSCQueue<NetPlay::GameInput>, 4> m_game_queue;
-  NetPad m_pad_buffer[PAD_BUFFER_SIZE][4] = {0};  // 
-  u32 m_player_drain_num[4] = {0};                 // how many frames of inputs we've drained per player this instance
-  u32 m_player_input_num[4] = {0};                 // total number frames of inputs we've received per player across the whole session, used for accessing the circular array
+  NetPad m_pad_buffer[PAD_BUFFER_SIZE][4] = {0};  //
+
+  u32 m_player_drain_num[4] = {0};                // how many frames of inputs we've drained per player this instance
+  u32 m_player_confirm_num[4] = {0};              // how many frames of inputs we've confirmed per player this instance
+  u32 m_player_input_num[4] = {0};                // total number frames of inputs we've received per player across the whole session, used for accessing the circular array
   u8 m_player_pad_map[4] = {0};                   // which ports are present
   int m_sim_frames = 0;                           // how many frames the game should simulate this tick
   u32 m_confirm_frame;                            // used to know when we are in a prediction
@@ -483,8 +484,10 @@ private:
   void Netsync_SendInputs(u8* write_ptr);
   void Netsync_Init(u32 input_delay);
   int Netsync_GetConfirmedInputNum();
-  int Netsync_GetSimulationFrames();
-  void Netsync_PredictInputs();
+  u32 Netsync_ValidatePrediction(int ply);
+  bool Netsync_CheckSimForward();
+  u32 Netsync_GetRollbackNum();
+  void Netsync_PredictInputs(int ply);
   u32 Netsync_GetLocalInputNum();
 
   // Input
@@ -502,6 +505,7 @@ private:
   void Match_Send(u8* write_ptr);
   int Frame_Prepare(int index);
   void Frame_Send(u8* write_ptr, u32 index);
+  u32 Playback_GetRollbackNum();
 
   // Rollback
   void SaveState_GetChunkSizes(std::vector<DolDataSection> sections, u32 section_num,
@@ -518,7 +522,8 @@ private:
   u32         cur_args = 0;
 
   StarpoleDataMatch       match_data;   
-  u32                     m_frame_idx;       // used to sequentially send game frames
+  u32                     m_file_frame_idx;       // the frame in the file we are reading (can diverge from the game frame if rollbacks are included in the replay)
+  u32                     m_game_frame_idx;       // the game frame number the current frame corresponds to
   StarpoleReplayState     replay_state;
   bool                    is_active = false;
 

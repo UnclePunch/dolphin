@@ -2316,7 +2316,7 @@ void NetPlayClient::AddGameInputToPacket(int in_game_pad, const GameInput& input
            << input.status.triggerLeft << input.status.triggerRight << input.status.isConnected;
   }
 
-  INFO_LOG_FMT(EXPANSIONINTERFACE, " sending to clients: frame {} port {} ({}:{}) 0x{:04X}", input.frame, in_game_pad,
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "sending to clients: frame {} port {} ({}:{}) 0x{:04X}", input.frame, in_game_pad,
                (s8)input.status.stickX,
                (s8)input.status.stickY, input.status.button);
 }
@@ -3127,7 +3127,7 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
       if (input.instance_idx < m_instance_idx)
       {
         INFO_LOG_FMT(EXPANSIONINTERFACE,
-                     " discarding drained input port {} frame {} from previous instance {}", i,
+                     "discarding drained input port {} frame {} from previous instance {}", i,
                      input.frame, input.instance_idx);
         continue;
       }
@@ -3163,8 +3163,9 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
       // generate input hash
       m_pad_buffer[arr_idx][i].hash_real = NetPlay_HashPadStatus(&m_pad_buffer[arr_idx][i].status);
 
+
       INFO_LOG_FMT(EXPANSIONINTERFACE,
-                   " drained input: frame {} port {} ({}:{}) 0x{:04X} to array_index {} with hash 0x{:08x}", input.frame, i,
+                   "drained input: frame {} port {} ({}:{}) 0x{:04X} to array_index {} with hash 0x{:08x}", input.frame, i,
                    (s8)m_pad_buffer[arr_idx][i].status.stickX,
                    (s8)m_pad_buffer[arr_idx][i].status.stickY,
                    m_pad_buffer[arr_idx][i].status.button, arr_idx, m_pad_buffer[arr_idx][i].hash_real);

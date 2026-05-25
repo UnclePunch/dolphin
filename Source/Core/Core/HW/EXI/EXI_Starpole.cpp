@@ -46,7 +46,8 @@ void CEXIStarpole::DoState(PointerWrap& p)
   p.Do(cur_cmd);
   p.Do(cur_args);
 
-  p.Do(m_frame_idx);
+  p.Do(m_file_frame_idx);
+  p.Do(m_game_frame_idx);
   p.Do(replay_state);
 
   p.Do(m_is_rollback_active);
@@ -57,6 +58,7 @@ void CEXIStarpole::DoState(PointerWrap& p)
   p.DoArray(m_pad_buffer, sizeof(m_pad_buffer));
   p.DoArray(m_player_input_num, sizeof(m_player_input_num));
   p.DoArray(m_player_drain_num, sizeof(m_player_drain_num));
+  p.DoArray(m_player_confirm_num, sizeof(m_player_confirm_num));
   p.Do(m_sim_frames);
   p.Do(m_confirm_frame);
   p.Do(m_forward_frame);
@@ -145,29 +147,30 @@ u32 CEXIStarpole::ImmRead(u32 size)
     break;
 
   case STARPOLE_CMD_NETPADRECV:   // game is requesting inputs
-
+  {
     m_global_timer++;
 
     // check for remote inputs, copy them to our pad buffer and update
     NetPlay_DrainPadQueue();
 
-    // determine how many frames to simulate
-    m_sim_frames = Netsync_GetSimulationFrames();
+    bool is_sim_forward = Netsync_CheckSimForward();
+    u32 rollback_num = Netsync_GetRollbackNum();
 
-    if (m_is_rollback_active)
-    {
-      // request a load state
-      if (m_sim_frames > 1)
-        m_req_load = (m_sim_frames - 1);
-    }
+    // request a load state
+    if (rollback_num > 0)
+      m_req_load = rollback_num;
 
-    if (m_sim_frames > 0)
+    if (is_sim_forward)
       m_forward_frame++;
+
+    // determine how many frames to simulate
+    m_sim_frames = is_sim_forward ? (rollback_num + 1) : (rollback_num);
 
     // tell game how many frames to simulate
     response = m_sim_frames;
 
     break;
+  }
 
   case STARPOLE_CMD_NETSAVE:
     if (m_is_rollback_active)
@@ -388,9 +391,12 @@ void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
 
       memcpy(&local_status[i][j], &m_pad_buffer[arr_idx][j].status, sizeof(GCPadStatus));
 
-      INFO_LOG_FMT(EXPANSIONINTERFACE, "frame {} port {} ({}:{}) 0x{:04X} (arr_idx {})", cur_frame,
-                   j, (s8)local_status[i][j].stickX, (s8)local_status[i][j].stickY,
-                   local_status[i][j].button, arr_idx);
+      if (m_player_pad_map[j] != 0)
+      {
+        INFO_LOG_FMT(EXPANSIONINTERFACE, " port {} frame {} ({}:{}) 0x{:04X} (arr_idx {}) state {}",
+                     j, cur_frame, (s8)local_status[i][j].stickX, (s8)local_status[i][j].stickY,
+                     local_status[i][j].button, arr_idx, (int)m_pad_buffer[arr_idx][j].state);
+      }
     }
   }
 }
@@ -411,6 +417,7 @@ void CEXIStarpole::Netsync_Init(u32 input_delay)
   }
 
   memset(m_player_drain_num, 0, sizeof(m_player_drain_num));
+  memset(m_player_confirm_num, 0, sizeof(m_player_confirm_num));
   // memset(m_player_input_num, 0, sizeof(m_player_input_num));
   // memset(m_pad_buffer, 0, sizeof(m_pad_buffer));
   m_confirm_frame = -1;
@@ -425,9 +432,6 @@ void CEXIStarpole::Netsync_Init(u32 input_delay)
     memset(pad, 0, sizeof(pad));
     NetPlay_SendGameInput(pad);
   }
-
-  // pull in queued inputs we may have received in the previous instance
-
 }
 
 int CEXIStarpole::Netsync_GetConfirmedInputNum()
@@ -467,7 +471,98 @@ int CEXIStarpole::Netsync_GetConfirmedInputNum()
   return input_num;
 }
 
-int CEXIStarpole::Netsync_GetSimulationFrames()
+u32 CEXIStarpole::Netsync_ValidatePrediction(int ply)
+{
+  // returns number of frames required to rollback
+
+  // skip if not present or is a local player
+  if (m_player_pad_map[ply] == 0 || m_player_pad_map[ply] == m_local_pid)
+    return 0;
+
+  // if every drained input has been confirmed, its probably not worth validating anything
+  if (m_player_confirm_num[ply] == m_player_drain_num[ply])
+    return 0;
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "prediction: validating player {} from frame {} to {}...", ply,
+               m_player_confirm_num[ply], m_player_drain_num[ply]);
+
+  // we are in a prediction branch and received a past input
+  // lets validate the predicted input against the one received and determine if we should
+  // rollback
+  u32 rollback_num = 0;
+  for (u32 i = m_player_confirm_num[ply]; i < m_player_drain_num[ply]; i++)
+  {
+    int pad_idx = (m_instance_read_start + i + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
+
+    // check predicted hash against real hash
+    if (m_pad_buffer[pad_idx][ply].state == STARPOLE_NETPAD_CORRECTED)
+    {
+      INFO_LOG_FMT(EXPANSIONINTERFACE,
+                   "prediction: validating frame {} port {}. real {:08x} vs predicted {:08x}",
+                   m_pad_buffer[pad_idx][ply].frame, ply, m_pad_buffer[pad_idx][ply].hash_real,
+                   m_pad_buffer[pad_idx][ply].hash_predict);
+      INFO_LOG_FMT(
+          EXPANSIONINTERFACE,
+          "    real: buttons: 0x{:04X} lstick ({:+04d}, {:+04d}) rstick ({:+04d}, {:+04d}) "
+          "triggers ({:04d}, {:04d}) analog AB ({:04d}, {:04d}) isConnected: {} hash: {:08x}",
+          m_pad_buffer[pad_idx][ply].status.button, (s8)m_pad_buffer[pad_idx][ply].status.stickX,
+          (s8)m_pad_buffer[pad_idx][ply].status.stickY,
+          (s8)m_pad_buffer[pad_idx][ply].status.substickX,
+          (s8)m_pad_buffer[pad_idx][ply].status.substickY,
+          m_pad_buffer[pad_idx][ply].status.triggerLeft,
+          m_pad_buffer[pad_idx][ply].status.triggerRight, m_pad_buffer[pad_idx][ply].status.analogA,
+          m_pad_buffer[pad_idx][ply].status.analogB,
+          (u8)m_pad_buffer[pad_idx][ply].status.isConnected, m_pad_buffer[pad_idx][ply].hash_real);
+      u8* data = (u8*)&m_pad_buffer[pad_idx][ply].status;
+      for (size_t cur = 0; cur < sizeof(m_pad_buffer[pad_idx][cur].status); cur++)
+        printf("%02x ", data[cur]);
+      printf("\n");
+
+      INFO_LOG_FMT(
+          EXPANSIONINTERFACE,
+          " predict: buttons: 0x{:04X} lstick ({:+04d}, {:+04d}) rstick ({:+04d}, {:+04d}) "
+          "triggers ({:04d}, {:04d}) analog AB ({:04d}, {:04d}) isConnected: {} hash: {:08x}",
+          m_pad_buffer[pad_idx][ply].status_predict.button,
+          (s8)m_pad_buffer[pad_idx][ply].status_predict.stickX,
+          (s8)m_pad_buffer[pad_idx][ply].status_predict.stickY,
+          (s8)m_pad_buffer[pad_idx][ply].status_predict.substickX,
+          (s8)m_pad_buffer[pad_idx][ply].status_predict.substickY,
+          m_pad_buffer[pad_idx][ply].status_predict.triggerLeft,
+          m_pad_buffer[pad_idx][ply].status_predict.triggerRight,
+          m_pad_buffer[pad_idx][ply].status_predict.analogA,
+          m_pad_buffer[pad_idx][ply].status_predict.analogB,
+          (u8)m_pad_buffer[pad_idx][ply].status_predict.isConnected,
+          m_pad_buffer[pad_idx][ply].hash_predict);
+      data = (u8*)&m_pad_buffer[pad_idx][ply].status_predict;
+      for (size_t cur = 0; cur < sizeof(m_pad_buffer[pad_idx][cur].status_predict); cur++)
+        printf("%02x ", data[cur]);
+      printf("\n");
+
+      if (m_pad_buffer[pad_idx][ply].hash_real != m_pad_buffer[pad_idx][ply].hash_predict)
+      {
+        // prediction was incorrect, should rollback to here
+        INFO_LOG_FMT(EXPANSIONINTERFACE, " frame {} was invalid!", i);
+
+        rollback_num = (m_forward_frame - i);
+
+        // break out and lets repredict using the last correct input
+        break;
+      }
+    }
+  }
+
+  // predicted correctly
+  if (rollback_num == 0)
+  {
+    ;
+    INFO_LOG_FMT(EXPANSIONINTERFACE, " frames {} to {} were valid!", m_player_confirm_num[ply],
+                 m_player_drain_num[ply]);
+  }
+
+  return rollback_num;
+}
+
+bool CEXIStarpole::Netsync_CheckSimForward()
 {
   if (m_is_rollback_active)
   {
@@ -475,198 +570,74 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
     if (FORCE_ROLLBACK)
     {
       m_confirm_frame = m_forward_frame;
-
-      if (m_forward_frame >= (MAX_ROLLBACK_NUM) && m_forward_frame % MAX_ROLLBACK_NUM == 0)
-        return MAX_ROLLBACK_NUM + 1;
-      else
-        return 1;
-
+      return true;
     }
 
-    bool is_predicting = ((m_forward_frame - m_confirm_frame) > 1);
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "");
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "determining sim_frames for forward_frame {}",
+                 m_forward_frame);
 
-    // check if we have all player inputs (by calling a starpole function that checks is_received on all ports)
-    int input_num = Netsync_GetConfirmedInputNum();
+    u32 is_sim_forward = false;
+    bool is_in_prediction = ((m_forward_frame - m_confirm_frame) > 1);
 
-    if (input_num > 0)
+    // check how many frames of confirmed inputs we have between confirm_frame and forward_frame
+    int confirm_num = Netsync_GetConfirmedInputNum();
+
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "confirm_num {}", confirm_num);
+
+    if (confirm_num > 0)
     {
-      if (!is_predicting)
+      // update confirm frame
+      INFO_LOG_FMT(EXPANSIONINTERFACE, " advancing m_confirm_frame from {} to {}", m_confirm_frame,
+                   m_confirm_frame + confirm_num);
+      m_confirm_frame += confirm_num;
+
+      if (!is_in_prediction)
       {
-        INFO_LOG_FMT(EXPANSIONINTERFACE, "rollback: got input in time, moving forward");
-
-        // we havent predicted any inputs meaning the delay buffer has accounted for all lag.
-        // simulate forward
-        m_confirm_frame = m_forward_frame;
-        return 1;
+        // we havent predicted any inputs, meaning the delay buffer has accounted for all lag.
+        INFO_LOG_FMT(EXPANSIONINTERFACE, "rollback: got all inputs in time, moving forward");
       }
-      else
-      {
-        INFO_LOG_FMT(EXPANSIONINTERFACE, "prediction: validating from frame {} to {}...",
-                     m_confirm_frame + 1, m_confirm_frame + 1 + input_num);
 
-        // we are in a prediction branch and received a past input
-        // lets validate the predicted input against the one received and determine if we should rollback
-        int rollback_num = 0;
-        for (int i = 0; i < input_num; i++)
-        {
-          int pad_idx = (m_instance_read_start + m_confirm_frame + 1 + i + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
-
-          int is_all_correct = 1;
-          for (int j = 0; j < 4; j++)
-          {
-            if (m_player_pad_map[j] == 0)
-              continue;
-
-            //INFO_LOG_FMT(EXPANSIONINTERFACE,
-            //             "frame {} ({}) port {}. state {}",
-            //             m_confirm_frame + 1,
-            //             m_pad_buffer [pad_idx][j].frame,
-            //             j,
-            //             (u32)m_pad_buffer[pad_idx][j].state);
-
-            // check predicted hash against real hash
-            if (m_pad_buffer[pad_idx][j].state == STARPOLE_NETPAD_CORRECTED)
-            {
-
-              INFO_LOG_FMT(EXPANSIONINTERFACE, "prediction: validating frame {} port {}. real {:08x} vs predicted {:08x}",
-                           m_pad_buffer[pad_idx][j].frame, j, m_pad_buffer[pad_idx][j].hash_real,
-                           m_pad_buffer[pad_idx][j].hash_predict);
-              INFO_LOG_FMT(EXPANSIONINTERFACE, "    real: buttons: 0x{:04X} lstick ({:+04d}, {:+04d}) rstick ({:+04d}, {:+04d}) triggers ({:04d}, {:04d}) analog AB ({:04d}, {:04d}) isConnected: {} hash: {:08x}",
-                           m_pad_buffer[pad_idx][j].status.button,
-                           (s8)m_pad_buffer[pad_idx][j].status.stickX,
-                           (s8)m_pad_buffer[pad_idx][j].status.stickY,
-                           (s8)m_pad_buffer[pad_idx][j].status.substickX,
-                           (s8)m_pad_buffer[pad_idx][j].status.substickY,
-                           m_pad_buffer[pad_idx][j].status.triggerLeft,
-                           m_pad_buffer[pad_idx][j].status.triggerRight,
-                           m_pad_buffer[pad_idx][j].status.analogA,
-                           m_pad_buffer[pad_idx][j].status.analogB,
-                           (u8)m_pad_buffer[pad_idx][j].status.isConnected,
-                           m_pad_buffer[pad_idx][j].hash_real);
-              u8* data = (u8*)&m_pad_buffer[pad_idx][j].status;
-              for (size_t cur = 0; cur < sizeof(m_pad_buffer[pad_idx][cur].status); cur++)
-                printf("%02x ", data[cur]);
-              printf("\n");
-
-              INFO_LOG_FMT(EXPANSIONINTERFACE, " predict: buttons: 0x{:04X} lstick ({:+04d}, {:+04d}) rstick ({:+04d}, {:+04d}) triggers ({:04d}, {:04d}) analog AB ({:04d}, {:04d}) isConnected: {} hash: {:08x}",
-                           m_pad_buffer[pad_idx][j].status_predict.button,
-                           (s8)m_pad_buffer[pad_idx][j].status_predict.stickX,
-                           (s8)m_pad_buffer[pad_idx][j].status_predict.stickY,
-                           (s8)m_pad_buffer[pad_idx][j].status_predict.substickX,
-                           (s8)m_pad_buffer[pad_idx][j].status_predict.substickY,
-                           m_pad_buffer[pad_idx][j].status_predict.triggerLeft,
-                           m_pad_buffer[pad_idx][j].status_predict.triggerRight,
-                           m_pad_buffer[pad_idx][j].status_predict.analogA,
-                           m_pad_buffer[pad_idx][j].status_predict.analogB,
-                           (u8)m_pad_buffer[pad_idx][j].status_predict.isConnected,
-                           m_pad_buffer[pad_idx][j].hash_predict);
-              data = (u8*)&m_pad_buffer[pad_idx][j].status_predict;
-              for (size_t cur = 0; cur < sizeof(m_pad_buffer[pad_idx][cur].status_predict); cur++)
-                printf("%02x ", data[cur]);
-              printf("\n");
-
-              if (m_pad_buffer[pad_idx][j].hash_real != m_pad_buffer[pad_idx][j].hash_predict)
-              {
-                is_all_correct = 0;
-                break;
-              }
-            }
-          }
-
-          // prediction was incorrect, rollback to here
-          if (!is_all_correct)
-          {
-            INFO_LOG_FMT(EXPANSIONINTERFACE, "prediction: frame {} was invalid",
-                         m_confirm_frame + 1 + i);
-
-            rollback_num = (m_forward_frame - m_confirm_frame - 1) - i;
-
-            // break out and lets repredict using the last correct input
-            break;
-          }
-        }
-
-        // predicted correctly
-        if (rollback_num == 0)
-        {
-          INFO_LOG_FMT(EXPANSIONINTERFACE, "prediction: frames {} to {} were valid!",
-                       m_confirm_frame + 1, m_confirm_frame + 1 + input_num);
-        }
-
-        m_confirm_frame += input_num;
-        INFO_LOG_FMT(EXPANSIONINTERFACE, " advancing m_confirm_frame to {}", m_confirm_frame);
-
-        // predict forward if need be
-        Netsync_PredictInputs();
-
-        return rollback_num + 1;
-      }
+      is_sim_forward = true;  // simulate forward
     }
     else
     {
-      // we're missing their input
-      int sim_frames = 0;
-
+      // stall if rollback not enabled
       if (!ROLLBACK_ENABLE)
-        return sim_frames;
+        return false;
+    }
 
-      if (is_predicting)
+    if (is_in_prediction)
+    {
+      // we are in a prediction branch
+      if ((m_forward_frame - m_confirm_frame) > MAX_ROLLBACK_NUM)
       {
-        // we are in a prediction branch
-
-        // we've already predicted the max amount of times, halt simulation until we receive some
-        // inputs
-        if ((m_forward_frame - m_confirm_frame) > MAX_ROLLBACK_NUM)
-        {
-          sim_frames = 0;
-
-          // INFO_LOG_FMT(EXPANSIONINTERFACE,
-          //              "rollback: input missing. we've predicted the maximum amount of times,
-          //              will stall...");
-        }
-        else
-        {
-          sim_frames = 1;
-
-          INFO_LOG_FMT(EXPANSIONINTERFACE, "rollback: input missing. advancing to prediction #{}",
-                       m_forward_frame - m_confirm_frame - 1);
-        }
+        // we've already predicted the max amount of times, halt simulation until we receive more
+        // confirmed frames
+        is_sim_forward = false;
       }
       else
       {
-        // lets branch off to a prediction
-        // m_confirm_frame = m_forward_frame;
+        is_sim_forward = true;
 
-        // before we predict lets make sure we have at least one input to use
-        int is_received_one_frame = 1;
-        for (int i = 0; i < 4; i++)
-        {
-          if (m_player_pad_map[i] != 0 &&
-              m_player_drain_num [i] == 0)
-          {
-            is_received_one_frame = 0;
-            break;
-          }
-        }
-
-        if (is_received_one_frame)
-        {
-          INFO_LOG_FMT(EXPANSIONINTERFACE,
-                       "rollback: missing inputs, branching off to a prediction!");
-
-          sim_frames = 1;
-        }
+        INFO_LOG_FMT(EXPANSIONINTERFACE, "rollback: input missing. advancing to prediction #{}",
+                     m_forward_frame - m_confirm_frame);
       }
+    }
+    else if (confirm_num == 0)
+    {
+      // lets branch off to a prediction
+      INFO_LOG_FMT(EXPANSIONINTERFACE,
+                   "rollback: input missing. starting a prediction branch!");
 
-      // predict missing inputs
-      if (sim_frames > 0)
-        Netsync_PredictInputs();
-
-      return sim_frames;
-
+      is_sim_forward = true;
     }
 
-    // INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE Requested inputs, returned {}", response);
+    INFO_LOG_FMT(EXPANSIONINTERFACE,
+                 "rollback: performing {} sim_frames at forward_frame {} | confirm_frame {}",
+                 is_sim_forward, m_forward_frame, m_confirm_frame);
+
+    return is_sim_forward;
   }
   else
   {
@@ -681,35 +652,87 @@ int CEXIStarpole::Netsync_GetSimulationFrames()
   }
 }
 
-void CEXIStarpole::Netsync_PredictInputs()
+u32 CEXIStarpole::Netsync_GetRollbackNum()
 {
-  for (u32 this_predict_frame = m_confirm_frame + 1; this_predict_frame <= m_forward_frame; this_predict_frame++)
+  u32 rollback_num = 0;
+
+  if (!m_is_rollback_active)
+    return 0;
+
+  // handle replay rollbacks first
+  if (replay_state == STARPOLE_REPLAYSTATE_PLAYBACK)
+    return Playback_GetRollbackNum();
+
+  if (FORCE_ROLLBACK)
+  {
+    if (m_forward_frame >= (MAX_ROLLBACK_NUM) && m_forward_frame % MAX_ROLLBACK_NUM == 0)
+      return MAX_ROLLBACK_NUM;
+    else
+      return 0;
+  }
+
+  // validate newly received player inputs
+  for (int i = 0; i < 4; i++)
+  {
+    u32 ply_rollback_num = Netsync_ValidatePrediction(i);
+
+    if (ply_rollback_num > rollback_num)
+      rollback_num = ply_rollback_num;
+  }
+
+  // confirm new inputs
+  for (int i = 0; i < 4; i++)
+  {
+    // skip
+    if (m_player_pad_map[i] == 0)
+      continue;
+
+    u32 new_confirm =
+        (m_player_drain_num[i] > m_forward_frame + 1) ? m_forward_frame + 1 : m_player_drain_num[i];
+
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "updating port {} confirm from {} to {}. drain_num: {}", i,
+                 m_player_confirm_num[i], new_confirm, m_player_confirm_num[i]);
+
+    m_player_confirm_num[i] = new_confirm;
+  }
+
+  // predict missing inputs
+  for (int i = 0; i < 4; i++)
+    Netsync_PredictInputs(i);
+
+  return rollback_num;
+}
+
+void CEXIStarpole::Netsync_PredictInputs(int ply)
+{
+  // skip if not present or is a local player
+  if (m_player_pad_map[ply] == 0 || m_player_pad_map[ply] == m_local_pid)
+    return;
+
+  // we need at least one confirmed input before predicting
+  if (m_player_confirm_num[ply] < 1)
+    return;
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE,
+               "updating predictions for port {}... m_confirm_num: {}, m_drain_num: {}", ply,
+               m_player_confirm_num[ply], m_player_drain_num[ply]);
+
+  for (u32 this_predict_frame = m_player_confirm_num[ply]; this_predict_frame <= m_forward_frame; this_predict_frame++)
   {
     int current_idx = (m_instance_read_start + this_predict_frame + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
-    int previous_idx = (m_instance_read_start +this_predict_frame - 1 + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
+    int previous_idx = (m_instance_read_start + this_predict_frame - 1 + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
 
     // use previous inputs for inputs not received
-    for (int i = 0; i < 4; i++)
-    {
-      // only remote inputs
-      if (m_player_pad_map[i] == 0 || m_player_pad_map[i] == m_local_pid)
-        continue;
+    m_pad_buffer[current_idx][ply].status = m_pad_buffer[previous_idx][ply].status;
+    m_pad_buffer[current_idx][ply].frame = this_predict_frame;
+    m_pad_buffer[current_idx][ply].state = STARPOLE_NETPAD_PREDICTED;
 
-      if (m_forward_frame >= (m_player_drain_num[i])) // we are missing the input we need
-      {
-        INFO_LOG_FMT(EXPANSIONINTERFACE, " predicting frame {} port {}!",
-                     this_predict_frame, i);
+    if (m_pad_buffer[previous_idx][ply].state == STARPOLE_NETPAD_PREDICTED)
+      m_pad_buffer[current_idx][ply].hash_predict = m_pad_buffer[previous_idx][ply].hash_predict;
+    else
+      m_pad_buffer[current_idx][ply].hash_predict = m_pad_buffer[previous_idx][ply].hash_real;
 
-        m_pad_buffer[current_idx][i].status = m_pad_buffer[previous_idx][i].status;
-        m_pad_buffer[current_idx][i].frame = this_predict_frame;
-        m_pad_buffer[current_idx][i].state = STARPOLE_NETPAD_PREDICTED;
-
-        if (m_pad_buffer[previous_idx][i].state == STARPOLE_NETPAD_PREDICTED)
-          m_pad_buffer[current_idx][i].hash_predict = m_pad_buffer[previous_idx][i].hash_predict;
-        else
-          m_pad_buffer[current_idx][i].hash_predict = m_pad_buffer[previous_idx][i].hash_real;
-      }
-    }
+    INFO_LOG_FMT(EXPANSIONINTERFACE, " predicted frame {}!", this_predict_frame);
   }
 }
 
@@ -785,10 +808,10 @@ void CEXIStarpole::Frame_Receive(u8* read_ptr, u32 size)
 
   WriteFile((uint8_t*)&frame, size);
 
-  /*
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "Frame {}: RNG Seed: {:08x}, Player Count: {}",
-               frame.frame_idx.ToHost(), frame.rng_seed.ToHost(), frame.ply_num);
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Replay: wrote game frame {}",
+               frame.frame_idx.ToHost());
 
+  /*
   const u32 ply_count = std::min<u32>(frame.ply_num, 4);
 
   // Per-player data
@@ -844,13 +867,14 @@ void CEXIStarpole::Match_Send(u8* write_ptr)
   
   INFO_LOG_FMT(EXPANSIONINTERFACE, "Frame Size 0x{:X}", match_data.frame_size.ToHost());
 
-  m_frame_idx = 0;
+  m_file_frame_idx = 0;
+  m_game_frame_idx = 0;
   replay_state = STARPOLE_REPLAYSTATE_PLAYBACK;
 }
 int CEXIStarpole::Frame_Prepare(int index)
 {
   int frame_size = match_data.frame_size.ToHost();
-  int offset = sizeof(StarpoleDataMatch) + index * frame_size;
+  int offset = sizeof(StarpoleDataMatch) + m_file_frame_idx * frame_size;
   int file_size = ReadFileSize();
 
   if (offset + frame_size > file_size)
@@ -861,18 +885,51 @@ int CEXIStarpole::Frame_Prepare(int index)
 void CEXIStarpole::Frame_Send(u8* write_ptr, u32 index)
 {
   // read match data
-  StarpoleDataMatch frame;
+  StarpoleDataFrame frame;
 
-  int offset = sizeof(StarpoleDataMatch) + index * match_data.frame_size.ToHost();
   int frame_size = match_data.frame_size.ToHost();
+  int offset = sizeof(StarpoleDataMatch) + m_file_frame_idx * frame_size;
 
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "Sending frame {} of size 0x{:x}", index, frame_size);
   ReadFileOffset((uint8_t*)&frame, offset, frame_size);
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Replay: game requested frame {}, sending frame {}. file_frame: {}", index, frame.frame_idx.ToHost(), m_file_frame_idx);
 
   // write to game memory
   memcpy(write_ptr, (void*)&frame, sizeof(frame));
 
-  m_frame_idx++;
+  m_game_frame_idx = index; // update the game frame we are on
+  m_file_frame_idx++;       // update the file frame we are on
+}
+u32 CEXIStarpole::Playback_GetRollbackNum()
+{
+  // peek at next frame, see if we need to rollback
+  int frame_size = match_data.frame_size.ToHost();
+  int offset = sizeof(StarpoleDataMatch) + m_file_frame_idx * frame_size;
+  int file_size = ReadFileSize();
+
+  if (offset + frame_size > file_size)
+    return 0;
+
+
+  // read frame
+  StarpoleDataFrame frame;
+  ReadFileOffset((uint8_t*)&frame, offset, frame_size);
+  u32 replay_frame = frame.frame_idx.ToHost();
+  u32 game_frame = m_game_frame_idx + 1;                // need to + 1 here because the netsync code runs before the replay stuff...
+
+  // idk...
+  if (replay_frame == 0)
+    return 0;
+
+  // if next frame is earlier, rollback game state
+  if (replay_frame < game_frame)
+  {
+    u32 rollback_num = game_frame - replay_frame;   
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "Replay: performing {} rollbacks on game_frame {}, file_frame {}, replay_frame {}",
+                 rollback_num, game_frame, m_file_frame_idx, replay_frame);
+    return rollback_num;
+  }
+
+  return 0;
 }
 
 std::string CEXIStarpole::GenerateReplayFilename()
@@ -1303,6 +1360,18 @@ void CEXIStarpole::LoadState(u32 frames_back)
                savestate->frame_idx, (m_savestate_size / (1024.0 * 1024.0)),
                duration.count() / 1000.0,
                frames_back);
+
+  for (u32 i = 0; i < m_savestate_num; i++)
+  {
+    target_idx = ((int)m_savestate_idx - (int)i + MAX_SAVESTATES) % MAX_SAVESTATES;
+    savestate = reinterpret_cast<SavestateHeader*>(m_savestate_alloc.get() +
+                                                         (m_savestate_size * target_idx));
+
+    INFO_LOG_FMT(EXPANSIONINTERFACE,
+                 "savestate index {}: frame {}",
+                 i, savestate->frame_idx);
+  }
+
 }
 
 ExpansionInterface::CEXIStarpole* Starpole_Get()
