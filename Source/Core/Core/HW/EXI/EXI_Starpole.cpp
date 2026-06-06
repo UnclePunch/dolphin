@@ -53,12 +53,12 @@ void CEXIStarpole::DoState(PointerWrap& p)
   p.Do(m_is_rollback_active);
   p.Do(m_req_load);
   p.Do(m_savestate_size);
-  p.Do(m_savestate_idx);
+  p.Do(m_is_sim_forward);
   p.Do(m_savestate_num);
-  p.DoArray(m_pad_buffer, sizeof(m_pad_buffer));
-  p.DoArray(m_player_input_num, sizeof(m_player_input_num));
-  p.DoArray(m_player_drain_num, sizeof(m_player_drain_num));
-  p.DoArray(m_player_confirm_num, sizeof(m_player_confirm_num));
+  p.DoArray(m_pad_buffer, sizeof(m_pad_buffer) / sizeof(m_pad_buffer[0]));
+  p.DoArray(m_player_input_num, sizeof(m_player_input_num) / sizeof(m_player_input_num[0]));
+  p.DoArray(m_player_drain_num, sizeof(m_player_drain_num) / sizeof(m_player_drain_num[0]));
+  p.DoArray(m_player_confirm_num, sizeof(m_player_confirm_num) / sizeof(m_player_confirm_num[0]));
   p.Do(m_sim_frames);
   p.Do(m_confirm_frame);
   p.Do(m_forward_frame);
@@ -153,18 +153,15 @@ u32 CEXIStarpole::ImmRead(u32 size)
     // check for remote inputs, copy them to our pad buffer and update
     NetPlay_DrainPadQueue();
 
-    bool is_sim_forward = Netsync_CheckSimForward();
-    u32 rollback_num = Netsync_GetRollbackNum();
+    m_is_sim_forward = Netsync_CheckSimForward();
+    m_rollback_num = Netsync_GetRollbackNum();
 
     // request a load state
-    if (rollback_num > 0)
-      m_req_load = rollback_num;
-
-    if (is_sim_forward)
-      m_forward_frame++;
+    if (m_rollback_num > 0)
+      m_req_load = m_rollback_num;
 
     // determine how many frames to simulate
-    m_sim_frames = is_sim_forward ? (rollback_num + 1) : (rollback_num);
+    m_sim_frames = m_is_sim_forward ? (m_rollback_num + 1) : (m_rollback_num);
 
     // tell game how many frames to simulate
     response = m_sim_frames;
@@ -178,12 +175,15 @@ u32 CEXIStarpole::ImmRead(u32 size)
       // load state if needed
       if (m_req_load)
       {
-        LoadState(m_req_load);
+        u32 load_idx = cur_args - m_req_load;
+        INFO_LOG_FMT(EXPANSIONINTERFACE, "Loading frame {} ({} - {})", load_idx, cur_args, m_req_load);
+        LoadState(load_idx);
         m_req_load = 0;
       }
       else
         SaveState(cur_args);
     }
+
     response = 1;
 
     break;
@@ -264,6 +264,10 @@ void CEXIStarpole::DMARead(u32 address, u32 size)
     break;
   case STARPOLE_CMD_NETPADRECV:
     Netsync_SendInputs(write_ptr);
+
+    if (m_is_sim_forward)
+      m_forward_frame++;
+
     break;
 
   default:
@@ -375,14 +379,15 @@ void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
     return;
 
   GCPadStatus(*local_status)[4] = (GCPadStatus(*)[4])write_ptr;
-  int read_frame = m_instance_read_start + (m_forward_frame - m_sim_frames);
+  int read_frame = m_instance_read_start + (m_forward_frame - m_rollback_num);
 
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Netsync_SendInputs read_frame: {}", read_frame);
   INFO_LOG_FMT(EXPANSIONINTERFACE, "sending to game:");
   
   for (int i = 0; i < m_sim_frames; i++)
   {
     int arr_idx = ((read_frame + i) + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
-    int cur_frame = (m_forward_frame - m_sim_frames) + i;
+    int cur_frame = (read_frame + i) - m_instance_read_start;
 
     for (int j = 0; j < 4; j++)
     {
@@ -393,8 +398,9 @@ void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
 
       if (m_player_pad_map[j] != 0)
       {
-        INFO_LOG_FMT(EXPANSIONINTERFACE, " port {} frame {} ({}:{}) 0x{:04X} (arr_idx {}) state {}",
-                     j, cur_frame, (s8)local_status[i][j].stickX, (s8)local_status[i][j].stickY,
+        INFO_LOG_FMT(EXPANSIONINTERFACE, " port {} frame {} ({}:{}) 0x{:04X} (arr_idx {}) state {}", j, cur_frame,
+                     (s8) local_status[i][j].stickX,
+                     (s8)local_status[i][j].stickY,
                      local_status[i][j].button, arr_idx, (int)m_pad_buffer[arr_idx][j].state);
       }
     }
@@ -572,6 +578,10 @@ bool CEXIStarpole::Netsync_CheckSimForward()
       m_confirm_frame = m_forward_frame;
       return true;
     }
+
+    // handle replay rollbacks first
+    if (replay_state == STARPOLE_REPLAYSTATE_PLAYBACK)
+      return Playback_CheckSimForward();
 
     INFO_LOG_FMT(EXPANSIONINTERFACE, "");
     INFO_LOG_FMT(EXPANSIONINTERFACE, "determining sim_frames for forward_frame {}",
@@ -899,6 +909,78 @@ void CEXIStarpole::Frame_Send(u8* write_ptr, u32 index)
   m_game_frame_idx = index; // update the game frame we are on
   m_file_frame_idx++;       // update the file frame we are on
 }
+
+bool CEXIStarpole::Playback_CheckSimForward()
+{
+  //m_confirm_frame++;
+  //return true;
+
+  // does the next frame in the file correspond to the next game frame? if yes sim forward
+  // does the next frame in the file come before the next game frame? does the next frame 
+
+  int frame_size = match_data.frame_size.ToHost();
+  int file_size = ReadFileSize();
+  StarpoleDataFrame frame;
+  int offset;
+  u32 replay_frame;
+  u32 game_frame = m_game_frame_idx + 1;
+
+  bool is_sim_forward = false;
+  offset = sizeof(StarpoleDataMatch) + (m_file_frame_idx)*frame_size;
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Replay: checking sim forward for game_frame {}...", game_frame);
+
+  // first frame
+  if (m_file_frame_idx == 0)
+    is_sim_forward = true;
+  else
+  {
+    if (offset + frame_size >= file_size)
+      is_sim_forward = true;
+    else
+    {
+      ReadFileOffset((uint8_t*)&frame, offset, frame_size);
+      replay_frame = frame.frame_idx.ToHost();
+
+      INFO_LOG_FMT(EXPANSIONINTERFACE, " next frame in replay is for frame {} (file_frame {})",
+                   replay_frame, m_file_frame_idx);
+
+      // is the next frame in the replay game_frame?
+      if (replay_frame == game_frame)
+        is_sim_forward = true;
+
+      // rollback impending
+      else if (replay_frame < game_frame)
+      {
+        u32 rollback_num = game_frame - replay_frame;
+        INFO_LOG_FMT(EXPANSIONINTERFACE, " detected {} rollbacks", rollback_num);
+
+        // does game_frame proceed the rollback?
+        offset = sizeof(StarpoleDataMatch) + (m_file_frame_idx + rollback_num) * frame_size;
+        if (offset + frame_size >= file_size)
+          is_sim_forward = true;
+        else
+        {
+          ReadFileOffset((uint8_t*)&frame, offset, frame_size);
+          replay_frame = frame.frame_idx.ToHost();
+
+          INFO_LOG_FMT(EXPANSIONINTERFACE, " frame after rollbacks is for frame {} (file_frame {})",
+                       replay_frame, m_file_frame_idx + rollback_num);
+
+          if (replay_frame == game_frame)
+            is_sim_forward = true;
+        }
+      }
+    }
+  }
+
+  if (is_sim_forward)
+    m_confirm_frame++;
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE, " is_sim_forward: {}", is_sim_forward);
+
+  return is_sim_forward;
+}
 u32 CEXIStarpole::Playback_GetRollbackNum()
 {
   // peek at next frame, see if we need to rollback
@@ -918,7 +1000,7 @@ u32 CEXIStarpole::Playback_GetRollbackNum()
 
   // idk...
   if (replay_frame == 0)
-    return 0;
+    return 0;    
 
   // if next frame is earlier, rollback game state
   if (replay_frame < game_frame)
@@ -1204,7 +1286,6 @@ void CEXIStarpole::SaveState_Init(DolDataSection* read_ptr, u32 section_num)
     }
   }
 
-  m_savestate_idx = 0;
   m_savestate_num = 0;
   m_savestate_size = savestate_size;
 
@@ -1217,7 +1298,6 @@ void CEXIStarpole::SaveState_End()
 {
   m_savestate_alloc.reset();        // streets are saying this is safe to call on a nullptr
 
-  m_savestate_idx = 0;
   m_savestate_num = 0;
   m_savestate_size = 0;
 
@@ -1227,15 +1307,9 @@ void CEXIStarpole::SaveState_End()
 
 SavestateHeader* CEXIStarpole::SaveState_Get(u32 frame_idx)
 {
-  for (u32 i = 0; i < m_savestate_num; i++)
-  {
-    auto* savestate = reinterpret_cast<SavestateHeader*>(m_savestate_alloc.get() + (m_savestate_size * i));
-
-    if (savestate->frame_idx == frame_idx)
-      return savestate;
-  }
-
-  return nullptr;
+  u32 save_idx = frame_idx % MAX_SAVESTATES;
+  auto* savestate = reinterpret_cast<SavestateHeader*>(m_savestate_alloc.get() + (m_savestate_size * save_idx));
+  return savestate;
 }
 
 void CEXIStarpole::SaveState(u32 frame_idx)
@@ -1251,7 +1325,8 @@ void CEXIStarpole::SaveState(u32 frame_idx)
   //u32 heap_start = m_system.GetMemory().Read_U32(0x80537f58);
   //u32 heap_size = m_system.GetMemory().Read_U32(0x80537f5c);
 
-  auto* savestate = reinterpret_cast<SavestateHeader*>(m_savestate_alloc.get() + (m_savestate_size * m_savestate_idx));
+  auto* savestate = SaveState_Get(frame_idx);
+
   savestate->frame_idx = frame_idx;
 
   auto& power_pc = m_system.GetPowerPC();
@@ -1298,18 +1373,31 @@ void CEXIStarpole::SaveState(u32 frame_idx)
   INFO_LOG_FMT(EXPANSIONINTERFACE, "frame {} savestate created: {:.3f} MB in {:.3f} ms",
                savestate->frame_idx, m_savestate_size / (1024.0f * 1024.0f), duration.count() / 1000.0);
 
-  m_savestate_idx = (m_savestate_idx + 1) % MAX_SAVESTATES;
-
   if (m_savestate_num < MAX_SAVESTATES)
     m_savestate_num++;
+
+  //for (u32 i = 0; i < m_savestate_num; i++)
+  //{
+  //  int target_idx = ((int)i + MAX_SAVESTATES) % MAX_SAVESTATES;
+  //  savestate = reinterpret_cast<SavestateHeader*>(m_savestate_alloc.get() +
+  //                                                 (m_savestate_size * target_idx));
+
+  //  INFO_LOG_FMT(EXPANSIONINTERFACE, "savestate index {}: frame {}", i, savestate->frame_idx);
+  //}
 }
 
-void CEXIStarpole::LoadState(u32 frames_back)
+void CEXIStarpole::LoadState(u32 frame_idx)
 {
   auto start = std::chrono::high_resolution_clock::now();
 
-  u32 target_idx = ((int)m_savestate_idx - (int)frames_back + MAX_SAVESTATES) % MAX_SAVESTATES;
-  auto* savestate = reinterpret_cast<SavestateHeader*>(m_savestate_alloc.get() + (m_savestate_size * target_idx));
+  auto* savestate = SaveState_Get(frame_idx);
+
+  // ensure its for the frame we want
+  if (savestate->frame_idx != frame_idx)
+  {
+    ERROR_LOG_FMT(EXPANSIONINTERFACE, "Error loading savestate for frame {}. Does not exist.", frame_idx);
+    return;
+  }
 
   if (1)
   {
@@ -1356,21 +1444,18 @@ void CEXIStarpole::LoadState(u32 frames_back)
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
   INFO_LOG_FMT(EXPANSIONINTERFACE,
-               "frame {} savestate loaded: {:.2f} MB in {:.2f} ms (from {} frames ago)",
+               "frame {} savestate loaded: {:.2f} MB in {:.2f} ms",
                savestate->frame_idx, (m_savestate_size / (1024.0 * 1024.0)),
-               duration.count() / 1000.0,
-               frames_back);
+               duration.count() / 1000.0);
 
-  for (u32 i = 0; i < m_savestate_num; i++)
-  {
-    target_idx = ((int)m_savestate_idx - (int)i + MAX_SAVESTATES) % MAX_SAVESTATES;
-    savestate = reinterpret_cast<SavestateHeader*>(m_savestate_alloc.get() +
-                                                         (m_savestate_size * target_idx));
+  //for (u32 i = 0; i < m_savestate_num; i++)
+  //{
+  //  int target_idx = ((int)i + MAX_SAVESTATES) % MAX_SAVESTATES;
+  //  savestate = reinterpret_cast<SavestateHeader*>(m_savestate_alloc.get() +
+  //                                                 (m_savestate_size * target_idx));
 
-    INFO_LOG_FMT(EXPANSIONINTERFACE,
-                 "savestate index {}: frame {}",
-                 i, savestate->frame_idx);
-  }
+  //  INFO_LOG_FMT(EXPANSIONINTERFACE, "savestate index {}: frame {}", i, savestate->frame_idx);
+  //}
 
 }
 

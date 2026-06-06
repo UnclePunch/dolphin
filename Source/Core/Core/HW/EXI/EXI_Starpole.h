@@ -448,7 +448,6 @@ private:
   static constexpr size_t MAX_ROLLBACK_NUM = 5;
   static constexpr size_t MAX_SAVESTATES = MAX_ROLLBACK_NUM;
   std::unique_ptr<u8[]> m_savestate_alloc;
-  int m_savestate_idx = 0;
   u32 m_savestate_num = 0;
   u32 m_req_load = 0;
   size_t m_savestate_size;
@@ -469,6 +468,8 @@ private:
   u32 m_player_input_num[4] = {0};                // total number frames of inputs we've received per player across the whole session, used for accessing the circular array
   u8 m_player_pad_map[4] = {0};                   // which ports are present
   int m_sim_frames = 0;                           // how many frames the game should simulate this tick
+  bool m_is_sim_forward;                          // whether or not we are simulating forward this update
+  u32 m_rollback_num;                             // number of frames we rollback this update
   u32 m_confirm_frame;                            // used to know when we are in a prediction
   u32 m_forward_frame;                            // used for keeping track of the next forward simulation frame
   u32 m_inputs_sent;
@@ -505,6 +506,7 @@ private:
   void Match_Send(u8* write_ptr);
   int Frame_Prepare(int index);
   void Frame_Send(u8* write_ptr, u32 index);
+  bool Playback_CheckSimForward();
   u32 Playback_GetRollbackNum();
 
   // Rollback
