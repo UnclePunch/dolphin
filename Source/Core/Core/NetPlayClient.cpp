@@ -1537,6 +1537,8 @@ void NetPlayClient::OnGameDigestAbort()
 
 void NetPlayClient::OnGameInput(sf::Packet& packet)
 {
+  std::lock_guard lk(NetPlay::crit_netplay_client);
+
   while (!packet.endOfPacket())
   {
     PadIndex map;
@@ -2299,6 +2301,7 @@ bool NetPlayClient::SendGameInput(GCPadStatus* status, u32 frame, u32 instance_i
       break;
     }
   }
+
   return true;
 }
 
@@ -3101,8 +3104,6 @@ void ExpansionInterface::CEXIStarpole::NetPlay_InitData()
 
 void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
 {
-  std::lock_guard lk(NetPlay::crit_netplay_client);
-
   if (!NetPlay::netplay_client)
     return;
 
@@ -3117,12 +3118,11 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
     if (!m_is_rollback_active && m_player_drain_num[i] > m_forward_frame)
       continue;
 
+    std::lock_guard lk(NetPlay::crit_netplay_client);
+
     NetPlay::GameInput input;
     while (NetPlay::netplay_client->GetPlayerGameInput(i, &input))
     {
-      // first check queued inputs that may have been drained while we were in the previous instance
-      // then check the net queue
-
       // discard inputs from a previous instance
       if (input.instance_idx < m_instance_idx)
       {
@@ -3135,7 +3135,8 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
       int arr_idx = (m_instance_read_start + m_player_drain_num[i]) % PAD_BUFFER_SIZE;
 
       // received input for frame we predicted
-      if (m_pad_buffer[arr_idx][i].state == STARPOLE_NETPAD_PREDICTED)
+      if (m_pad_buffer[arr_idx][i].frame == m_player_drain_num[i] &&    // ensure its not an old input
+          m_pad_buffer[arr_idx][i].state == STARPOLE_NETPAD_PREDICTED)  // we predicted it
       {
         m_pad_buffer[arr_idx][i].state = STARPOLE_NETPAD_CORRECTED;
         m_pad_buffer[arr_idx][i].status_predict = m_pad_buffer[arr_idx][i].status;
@@ -3163,12 +3164,11 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
       // generate input hash
       m_pad_buffer[arr_idx][i].hash_real = NetPlay_HashPadStatus(&m_pad_buffer[arr_idx][i].status);
 
-
       INFO_LOG_FMT(EXPANSIONINTERFACE,
-                   "drained input: frame {} port {} ({}:{}) 0x{:04X} to array_index {} with hash 0x{:08x}", input.frame, i,
+                   "drained input: frame {} port {} ({}:{}) 0x{:04X} has state {} with hash 0x{:08x}", input.frame, i,
                    (s8)m_pad_buffer[arr_idx][i].status.stickX,
                    (s8)m_pad_buffer[arr_idx][i].status.stickY,
-                   m_pad_buffer[arr_idx][i].status.button, arr_idx, m_pad_buffer[arr_idx][i].hash_real);
+                   m_pad_buffer[arr_idx][i].status.button, (u32)m_pad_buffer[arr_idx][i].state, m_pad_buffer[arr_idx][i].hash_real);
 
       //INFO_LOG_FMT(EXPANSIONINTERFACE,
       //             "      hash_real: {:08x}   hash_predict: {:08x}", m_pad_buffer[arr_idx][i].hash_real, m_pad_buffer[arr_idx][i].hash_predict);

@@ -483,7 +483,7 @@ private:
   void Dolphin_SendInfo(u8* write_ptr);
   void Netsync_ReceiveInputs(u8* read_ptr, u32 size);
   void Netsync_SendInputs(u8* write_ptr);
-  void Netsync_Init(u32 input_delay);
+  void Netsync_Init(bool is_rollback_active, u32 input_delay);
   int Netsync_GetConfirmedInputNum();
   u32 Netsync_ValidatePrediction(int ply);
   bool Netsync_CheckSimForward();
