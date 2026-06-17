@@ -31,7 +31,6 @@ CEXIStarpole::CEXIStarpole(Core::System& system, const std::string& name)
   SaveState_End();
   NetPlay_InitData();
 
-  m_global_timer = 0;
   m_instance_idx = 0;
   m_instance_read_start = 0;
 
@@ -148,8 +147,6 @@ u32 CEXIStarpole::ImmRead(u32 size)
 
   case STARPOLE_CMD_NETPADRECV:   // game is requesting inputs
   {
-    m_global_timer++;
-
     // check for remote inputs, copy them to our pad buffer and update
     NetPlay_DrainPadQueue();
 
@@ -891,123 +888,194 @@ void CEXIStarpole::Frame_Send(u8* write_ptr, u32 index)
 {
   // read match data
   StarpoleDataFrame frame;
+  Frame_Get(&frame, index);
 
-  int frame_size = match_data.frame_size.ToHost();
-  int offset = sizeof(StarpoleDataMatch) + m_file_frame_idx * frame_size;
-
-  ReadFileOffset((uint8_t*)&frame, offset, frame_size);
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "Replay: game requested frame {}, sending frame {}. file_frame: {}", index, frame.frame_idx.ToHost(), m_file_frame_idx);
 
   // write to game memory
   memcpy(write_ptr, (void*)&frame, sizeof(frame));
 
   m_game_frame_idx = index; // update the game frame we are on
-  m_file_frame_idx++;       // update the file frame we are on
+}
+
+bool CEXIStarpole::Frame_Read(StarpoleDataFrame* frame, u32 file_frame_index)
+{
+  u32 frame_size = match_data.frame_size.ToHost();
+  u32 file_size = ReadFileSize();
+
+  int offset = sizeof(StarpoleDataMatch) + file_frame_index * frame_size;
+  if (offset + frame_size > file_size)
+    return false;
+
+  ReadFileOffset((uint8_t*)frame, offset, frame_size);
+  return true;
+}
+
+bool CEXIStarpole::Frame_Get(StarpoleDataFrame *frame, u32 index)
+{
+  if (!REPLAY_ROLLBACKS)
+  {
+    int cur_file_frame_idx = m_file_frame_idx;
+    int target_file_frame_idx = -1;
+
+    // search until we are MAX_ROLLBACKS_NUM from the desired frame
+    for (int i = 0; i < MAX_ROLLBACK_NUM + 1; i++)
+    {
+      StarpoleDataFrame frame_temp;
+      u32 this_file_frame_idx = cur_file_frame_idx + i;
+
+      if (!Frame_Read(&frame_temp, this_file_frame_idx))
+        break;
+
+      u32 this_frame_idx = frame_temp.frame_idx.ToHost();
+      // check for a rollback
+      if (this_frame_idx < (index))
+      {
+        // find the frame we want in this rollback sim
+        target_file_frame_idx = this_file_frame_idx + (index - this_frame_idx);
+        cur_file_frame_idx += (index - this_frame_idx);
+      }
+      // the frame we are looking for
+      else if (this_frame_idx == (index))
+        target_file_frame_idx = this_file_frame_idx;
+    }
+
+    if (target_file_frame_idx == -1)
+      return false;
+
+    // read in final frame data
+    if (!Frame_Read(frame, target_file_frame_idx))
+      return false;
+
+    if (frame->frame_idx.ToHost() != index)
+    {
+      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Replay: Expected frame {} but found frame {}", index,
+                    frame->frame_idx.ToHost());
+    }
+
+    m_file_frame_idx = target_file_frame_idx + 1;
+    return true;
+
+  }
+  else
+  {
+    if (!Frame_Read(frame, m_file_frame_idx))
+      return false;
+
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "Replay: game requested frame {}, sending frame {}. file_frame: {}", index, frame->frame_idx.ToHost(), m_file_frame_idx);
+    m_file_frame_idx++;             // update the file frame we are on
+
+    return true;
+  }
 }
 
 bool CEXIStarpole::Playback_CheckSimForward()
 {
-  // does the next frame in the file correspond to the next game frame? if yes sim forward
-  // does the next frame in the file come before the next game frame? does the next frame 
-
-  int frame_size = match_data.frame_size.ToHost();
-  int file_size = ReadFileSize();
-  StarpoleDataFrame frame;
-  int offset;
-  u32 replay_frame;
   u32 game_frame = m_game_frame_idx + 1;
 
-  bool is_sim_forward = false;
-  offset = sizeof(StarpoleDataMatch) + (m_file_frame_idx)*frame_size;
-
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "Replay: checking sim forward for game_frame {}...", game_frame);
-
-  // first frame
-  if (m_file_frame_idx == 0)
-    is_sim_forward = true;
-  else
+  if (REPLAY_ROLLBACKS)
   {
-    if (offset + frame_size >= file_size)
+    StarpoleDataFrame frame;
+    u32 replay_frame;
+
+    bool is_sim_forward = false;
+
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "Replay: checking sim forward for game_frame {}...",
+                 game_frame);
+
+    // first frame
+    if (m_file_frame_idx == 0)
       is_sim_forward = true;
     else
     {
-      ReadFileOffset((uint8_t*)&frame, offset, frame_size);
-      replay_frame = frame.frame_idx.ToHost();
-
-      INFO_LOG_FMT(EXPANSIONINTERFACE, " next frame in replay is for frame {} (file_frame {})",
-                   replay_frame, m_file_frame_idx);
-
-      // is the next frame in the replay game_frame?
-      if (replay_frame == game_frame)
+      if (!Frame_Read(&frame, (m_file_frame_idx)))
         is_sim_forward = true;
-
-      // rollback impending
-      else if (replay_frame < game_frame)
+      else
       {
-        u32 rollback_num = game_frame - replay_frame;
-        INFO_LOG_FMT(EXPANSIONINTERFACE, " detected {} rollbacks", rollback_num);
+        replay_frame = frame.frame_idx.ToHost();
 
-        // does game_frame proceed the rollback?
-        offset = sizeof(StarpoleDataMatch) + (m_file_frame_idx + rollback_num) * frame_size;
-        if (offset + frame_size >= file_size)
+        INFO_LOG_FMT(EXPANSIONINTERFACE, " next frame in replay is for frame {} (file_frame {})",
+                     replay_frame, m_file_frame_idx);
+
+        // is the next frame in the replay game_frame?
+        if (replay_frame == game_frame)
           is_sim_forward = true;
-        else
+
+        // rollback impending
+        else if (replay_frame < game_frame)
         {
-          ReadFileOffset((uint8_t*)&frame, offset, frame_size);
-          replay_frame = frame.frame_idx.ToHost();
+          u32 rollback_num = game_frame - replay_frame;
+          INFO_LOG_FMT(EXPANSIONINTERFACE, " detected {} rollbacks", rollback_num);
 
-          INFO_LOG_FMT(EXPANSIONINTERFACE, " frame after rollbacks is for frame {} (file_frame {})",
-                       replay_frame, m_file_frame_idx + rollback_num);
-
-          if (replay_frame == game_frame)
+          // does game_frame proceed the rollback?
+          if (!Frame_Read(&frame, (m_file_frame_idx + rollback_num)))
             is_sim_forward = true;
+          else
+          {
+            replay_frame = frame.frame_idx.ToHost();
+
+            INFO_LOG_FMT(EXPANSIONINTERFACE,
+                         " frame after rollbacks is for frame {} (file_frame {})", replay_frame,
+                         m_file_frame_idx + rollback_num);
+
+            if (replay_frame == game_frame)
+              is_sim_forward = true;
+          }
         }
       }
     }
+
+    if ((game_frame - m_confirm_frame) > MAX_ROLLBACK_NUM)
+      m_confirm_frame = game_frame - MAX_ROLLBACK_NUM;
+
+    INFO_LOG_FMT(EXPANSIONINTERFACE, " is_sim_forward: {}", is_sim_forward);
+
+    return is_sim_forward;
   }
-
-  if ((game_frame - m_confirm_frame) > MAX_ROLLBACK_NUM)
-    m_confirm_frame = game_frame - MAX_ROLLBACK_NUM;
-
-  INFO_LOG_FMT(EXPANSIONINTERFACE, " is_sim_forward: {}", is_sim_forward);
-
-  return is_sim_forward;
+  else
+  {
+    m_confirm_frame = game_frame;
+    return true;
+  }
+  
 }
 u32 CEXIStarpole::Playback_GetRollbackNum()
 {
-  // peek at next frame, see if we need to rollback
-  int frame_size = match_data.frame_size.ToHost();
-  int offset = sizeof(StarpoleDataMatch) + m_file_frame_idx * frame_size;
-  int file_size = ReadFileSize();
-
-  if (offset + frame_size > file_size)
-    return 0;
-
-
-  // read frame
-  StarpoleDataFrame frame;
-  ReadFileOffset((uint8_t*)&frame, offset, frame_size);
-  u32 replay_frame = frame.frame_idx.ToHost();
-  u32 game_frame = m_game_frame_idx + 1;                // need to + 1 here because the netsync code runs before the replay stuff...
-
-  // idk...
-  if (replay_frame == 0)
-    return 0;    
-
-  // if next frame is earlier, rollback game state
-  if (replay_frame < game_frame)
+  if (REPLAY_ROLLBACKS)
   {
-    u32 rollback_num = game_frame - replay_frame;   
-    INFO_LOG_FMT(EXPANSIONINTERFACE, "Replay: performing {} rollbacks on game_frame {}, file_frame {}, replay_frame {}",
-                 rollback_num, game_frame, m_file_frame_idx, replay_frame);
+    // peek at next frame, see if we need to rollback
+    StarpoleDataFrame frame;
+    if (!Frame_Read(&frame, m_file_frame_idx))
+      return 0;
 
-    // new confirm frame
-    m_confirm_frame = replay_frame;
+    u32 replay_frame = frame.frame_idx.ToHost();
+    u32 game_frame =
+        m_game_frame_idx +
+        1;  // need to + 1 here because the netsync code runs before the replay stuff...
 
-    return rollback_num;
+    // idk...
+    if (replay_frame == 0)
+      return 0;
+
+    // if next frame is earlier, rollback game state
+    if (replay_frame < game_frame)
+    {
+      u32 rollback_num = game_frame - replay_frame;
+      INFO_LOG_FMT(
+          EXPANSIONINTERFACE,
+          "Replay: performing {} rollbacks on game_frame {}, file_frame {}, replay_frame {}",
+          rollback_num, game_frame, m_file_frame_idx, replay_frame);
+
+      // new confirm frame
+      m_confirm_frame = replay_frame;
+
+      return rollback_num;
+    }
+
+    return 0;
   }
-
-  return 0;
+  else
+    return 0;
+  
 }
 
 std::string CEXIStarpole::GenerateReplayFilename()

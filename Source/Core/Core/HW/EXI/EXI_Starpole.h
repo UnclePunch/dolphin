@@ -445,6 +445,7 @@ public:
 private:
   // rollback
   static constexpr bool ROLLBACK_ENABLE = true;
+  static constexpr bool REPLAY_ROLLBACKS = false;
   static constexpr size_t MAX_ROLLBACK_NUM = 5;
   static constexpr size_t MAX_SAVESTATES = MAX_ROLLBACK_NUM;
   std::unique_ptr<u8[]> m_savestate_alloc;
@@ -454,7 +455,6 @@ private:
   bool m_is_rollback_active = false;
   static constexpr bool ALWAYS_DELAY = false;
   static constexpr bool FORCE_ROLLBACK = false;
-  static constexpr float SPOOF_PING_MS = 53;
   static constexpr size_t MAX_DELAY = 99;
   static constexpr size_t PAD_BUFFER_SIZE = MAX_ROLLBACK_NUM + 1 + MAX_DELAY;  // rollback frames + 1 forward sim frame + 2 delay frames
 
@@ -473,7 +473,6 @@ private:
   u32 m_confirm_frame;                            // used to know when we are in a prediction
   u32 m_forward_frame;                            // used for keeping track of the next forward simulation frame
   u32 m_inputs_sent;
-  u32 m_global_timer;
   u32 m_instance_idx;
   u32 m_instance_read_start;
 
@@ -506,6 +505,8 @@ private:
   void Match_Send(u8* write_ptr);
   int Frame_Prepare(int index);
   void Frame_Send(u8* write_ptr, u32 index);
+  bool Frame_Read(StarpoleDataFrame* frame, u32 file_frame_index);
+  bool Frame_Get(StarpoleDataFrame* frame, u32 index);
   bool Playback_CheckSimForward();
   u32 Playback_GetRollbackNum();
 
