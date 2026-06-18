@@ -915,7 +915,7 @@ bool CEXIStarpole::Frame_Get(StarpoleDataFrame *frame, u32 index)
 {
   if (!Config::Get(Config::MAIN_STARPOLE_REPLAY_ROLLBACK))
   {
-    int cur_file_frame_idx = m_file_frame_idx;
+    u32 cur_file_frame_idx = m_file_frame_idx;
     int target_file_frame_idx = -1;
 
     // search until we are MAX_ROLLBACKS_NUM from the desired frame
@@ -923,17 +923,22 @@ bool CEXIStarpole::Frame_Get(StarpoleDataFrame *frame, u32 index)
     {
       StarpoleDataFrame frame_temp;
       u32 this_file_frame_idx = cur_file_frame_idx + i;
+      u32 cur_frame_idx = index + i;
 
       if (!Frame_Read(&frame_temp, this_file_frame_idx))
         break;
 
       u32 this_frame_idx = frame_temp.frame_idx.ToHost();
+
       // check for a rollback
-      if (this_frame_idx < (index))
+      if (this_frame_idx < cur_frame_idx)
       {
-        // find the frame we want in this rollback sim
-        target_file_frame_idx = this_file_frame_idx + (index - this_frame_idx);
-        cur_file_frame_idx += (index - this_frame_idx);
+        // does the desired frame exist in this rollback?
+        if (this_frame_idx <= index)
+          target_file_frame_idx = this_file_frame_idx + (index - this_frame_idx);
+
+        // get to the end of this rollback sequence
+        cur_file_frame_idx += (cur_frame_idx - this_frame_idx);
       }
       // the frame we are looking for
       else if (this_frame_idx == (index))
