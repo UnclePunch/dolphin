@@ -13,6 +13,7 @@
 #include "Core/HW/EXI/EXI.h"
 
 class ConfigBool;
+class ConfigInteger;
 class ConfigChoice;
 class ConfigText;
 class ConfigUserPath;
@@ -85,4 +86,7 @@ private:
   std::array<ConfigText*, 4> m_gba_rom_edits;
   QPushButton* m_gba_browse_saves;
   ConfigUserPath* m_gba_saves_edit;
+
+  ConfigBool* m_starpole_replay_rollback;
+  ConfigInteger* m_starpole_delay_frames;
 };

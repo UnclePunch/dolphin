@@ -13,6 +13,7 @@
 #include "Common/Logging/Log.h"
 #include "Common/ChunkFile.h"         // save states
 
+#include "Core/Config/MainSettings.h" // starpole UI pane config settings
 #include "Core/Core.h"                // needed to exec code from UI thread on main thread
 #include "Core/HW/Memmap.h"           // needed to write directly to game memory using DMA
 #include "Core/System.h"              // needed to write directly to game memory using DMA
@@ -912,7 +913,7 @@ bool CEXIStarpole::Frame_Read(StarpoleDataFrame* frame, u32 file_frame_index)
 
 bool CEXIStarpole::Frame_Get(StarpoleDataFrame *frame, u32 index)
 {
-  if (!REPLAY_ROLLBACKS)
+  if (!Config::Get(Config::MAIN_STARPOLE_REPLAY_ROLLBACK))
   {
     int cur_file_frame_idx = m_file_frame_idx;
     int target_file_frame_idx = -1;
@@ -972,7 +973,7 @@ bool CEXIStarpole::Playback_CheckSimForward()
 {
   u32 game_frame = m_game_frame_idx + 1;
 
-  if (REPLAY_ROLLBACKS)
+  if (Config::Get(Config::MAIN_STARPOLE_REPLAY_ROLLBACK))
   {
     StarpoleDataFrame frame;
     u32 replay_frame;
@@ -1040,7 +1041,7 @@ bool CEXIStarpole::Playback_CheckSimForward()
 }
 u32 CEXIStarpole::Playback_GetRollbackNum()
 {
-  if (REPLAY_ROLLBACKS)
+  if (Config::Get(Config::MAIN_STARPOLE_REPLAY_ROLLBACK))
   {
     // peek at next frame, see if we need to rollback
     StarpoleDataFrame frame;
@@ -1353,7 +1354,7 @@ void CEXIStarpole::SaveState_Init(DolDataSection* read_ptr, u32 section_num)
   m_savestate_num = 0;
   m_savestate_size = savestate_size;
 
-  Netsync_Init(true, 2);
+  Netsync_Init(true, Config::Get(Config::MAIN_STARPOLE_NET_DELAY));
 
 }
 

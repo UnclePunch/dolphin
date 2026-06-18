@@ -227,6 +227,10 @@ extern const Info<bool> MAIN_GBA_SAVES_IN_ROM_PATH;
 extern const Info<bool> MAIN_GBA_THREADS;
 #endif
 
+// Main.Starpole
+extern const Info<bool> MAIN_STARPOLE_REPLAY_ROLLBACK;
+extern const Info<int> MAIN_STARPOLE_NET_DELAY;
+
 // Main.Network
 
 extern const Info<bool> MAIN_NETWORK_SSL_DUMP_READ;

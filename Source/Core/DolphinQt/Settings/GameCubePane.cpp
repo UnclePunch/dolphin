@@ -35,6 +35,7 @@
 #include "Core/System.h"
 
 #include "DolphinQt/Config/ConfigControls/ConfigBool.h"
+#include "DolphinQt/Config/ConfigControls/ConfigInteger.h"
 #include "DolphinQt/Config/ConfigControls/ConfigChoice.h"
 #include "DolphinQt/Config/ConfigControls/ConfigText.h"
 #include "DolphinQt/Config/ConfigControls/ConfigUserPath.h"
@@ -230,11 +231,29 @@ void GameCubePane::CreateWidgets()
   gba_row++;
 #endif
 
+  // Starpole Settings
+  auto* starpole_box = new QGroupBox(tr("Starpole Settings"), this);
+  auto* starpole_layout = new QGridLayout(starpole_box);
+  starpole_box->setLayout(starpole_layout);
+  int starpole_row = 0;
+
+  m_starpole_delay_frames = new ConfigInteger(0, 9, Config::MAIN_STARPOLE_NET_DELAY);
+  starpole_layout->addWidget(new QLabel(tr("Rollback Input Delay")), 0, 0);
+  // m_starpole_delay_frames->SetTitle(tr("Rollback Input Delay"));
+  starpole_layout->addWidget(m_starpole_delay_frames, 0, 1);
+  starpole_row++;
+
+  m_starpole_replay_rollback =
+      new ConfigBool(tr("Display Rollbacks in Replays"), Config::MAIN_STARPOLE_REPLAY_ROLLBACK);
+  starpole_layout->addWidget(m_starpole_replay_rollback, starpole_row, 0, 1, -1);
+  starpole_row++;
+
   layout->addWidget(ipl_box);
   layout->addWidget(device_box);
 #ifdef HAS_LIBMGBA
   layout->addWidget(gba_box);
 #endif
+  layout->addWidget(starpole_box);
 
   layout->addStretch();
 

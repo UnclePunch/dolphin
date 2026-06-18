@@ -401,6 +401,10 @@ const Info<bool> MAIN_GBA_SAVES_IN_ROM_PATH{{System::Main, "GBA", "SavesInRomPat
 const Info<bool> MAIN_GBA_THREADS{{System::Main, "GBA", "Threads"}, true};
 #endif
 
+// Main.Starpole
+const Info<bool> MAIN_STARPOLE_REPLAY_ROLLBACK{{System::Main, "Starpole", "ReplayRollback"}, false};
+const Info<int> MAIN_STARPOLE_NET_DELAY{{System::Main, "Starpole", "NetDelay"}, 2};
+
 // Main.Network
 
 const Info<bool> MAIN_NETWORK_SSL_DUMP_READ{{System::Main, "Network", "SSLDumpRead"}, false};

@@ -445,7 +445,6 @@ public:
 private:
   // rollback
   static constexpr bool ROLLBACK_ENABLE = true;
-  static constexpr bool REPLAY_ROLLBACKS = false;
   static constexpr size_t MAX_ROLLBACK_NUM = 5;
   static constexpr size_t MAX_SAVESTATES = MAX_ROLLBACK_NUM;
   std::unique_ptr<u8[]> m_savestate_alloc;
