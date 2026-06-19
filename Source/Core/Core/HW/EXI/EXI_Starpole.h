@@ -190,11 +190,13 @@ typedef enum
   STARPOLE_CMD_TEST,
 
   // recording
+  STARPOLE_CMD_MODSAVE,
   STARPOLE_CMD_MATCH,
   STARPOLE_CMD_FRAME,
   STARPOLE_CMD_END,
 
   // playback
+  STARPOLE_CMD_REQMODSAVE,
   STARPOLE_CMD_REQMATCH,
   STARPOLE_CMD_REQFRAME,
 
@@ -243,6 +245,44 @@ typedef struct
 {
   char str[128];
 } StarpoleDataTest;
+
+//typedef struct
+//{
+//  char magic[4];      // will be SPRP (starpole replay)
+//  u16 version_major;
+//  u16 version_minor;
+//  char ply_names[4][30];
+//  u8 replay_num;      // number of replays contained in this file
+//  struct
+//  {
+//    u8 is_rollback;
+//    u32 mod_data;  // to-do
+//    struct
+//    {
+//      u32 match;      // StarpoleDataMatch
+//      u32 frames;     // StarpoleDataFrame array
+//      u32 result;     // to-do
+//    } offset;
+//  } replay[3];        // maximum of 3 per replay (city trial + up to 2 stadium rounds)
+//} StarpoleReplayHeader;
+
+typedef struct
+{
+  struct
+  {
+    u32 mod_save;
+    u32 match;
+    u32 results;
+    u32 frame;
+  } offset;
+} StarpoleReplayHeader;
+
+typedef struct
+{
+  be_u16 num;
+  be_u16 size;
+} StarpoleDataModSave;
+
 typedef struct
 {
   be_u32 rng_seed;
@@ -495,12 +535,14 @@ private:
   u8 NetPlay_ClampTrigger(u8 val);
 
   // Recording
+  void ModSave_Receive(u8* read_ptr, u32 size);
   void Match_Receive(u8* read_ptr, u32 size);
   void Frame_Receive(u8* read_ptr, u32 size);
   void End_Receive();
 
   // Playback
   int Match_Prepare();
+  void ModSave_Send(u8* write_ptr);
   void Match_Send(u8* write_ptr);
   int Frame_Prepare(int index);
   void Frame_Send(u8* write_ptr, u32 index);
@@ -523,7 +565,8 @@ private:
   StarpoleCmd cur_cmd = STARPOLE_CMD_NUM;  // current operation being carried out
   u32         cur_args = 0;
 
-  StarpoleDataMatch       match_data;   
+  StarpoleReplayHeader    m_replay_header;
+  StarpoleDataMatch       m_match_data;   
   u32                     m_file_frame_idx;       // the frame in the file we are reading (can diverge from the game frame if rollbacks are included in the replay)
   u32                     m_game_frame_idx;       // the game frame number the current frame corresponds to
   StarpoleReplayState     replay_state;

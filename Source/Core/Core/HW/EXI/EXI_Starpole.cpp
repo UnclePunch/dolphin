@@ -102,6 +102,16 @@ u32 CEXIStarpole::ImmRead(u32 size)
     response = sizeof(StarpoleDataTest);    // size of follow-up DMA response
     break;
 
+  case STARPOLE_CMD_MODSAVE:
+  case STARPOLE_CMD_MATCH:
+  case STARPOLE_CMD_FRAME:
+    response = 0;
+    break;
+
+  case STARPOLE_CMD_REQMODSAVE:
+    response = 1;
+    break;
+
   case STARPOLE_CMD_REQMATCH:
     response = Match_Prepare();
     break;
@@ -203,7 +213,7 @@ u32 CEXIStarpole::ImmRead(u32 size)
     break;
 
   default:
-    response = 0;
+    response = -1;
   }
 
   // INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE Imm Response {:08x}", response);
@@ -223,6 +233,9 @@ void CEXIStarpole::DMAWrite(u32 address, u32 size)
   // receive the data
   switch (cur_cmd)
   {
+  case STARPOLE_CMD_MODSAVE:
+    ModSave_Receive(read_ptr, size);
+    break;
   case STARPOLE_CMD_MATCH:
     Match_Receive(read_ptr, size);
     break;
@@ -257,6 +270,9 @@ void CEXIStarpole::DMARead(u32 address, u32 size)
   {
   case STARPOLE_CMD_TEST:
     File::GetUserPath(D_KAR_REPLAY_IDX).copy((char *)write_ptr, sizeof(StarpoleDataTest), 0);
+    break;
+  case STARPOLE_CMD_REQMODSAVE:
+    ModSave_Send(write_ptr);
     break;
   case STARPOLE_CMD_REQMATCH:
     Match_Send(write_ptr);
@@ -720,6 +736,14 @@ void CEXIStarpole::Netsync_PredictInputs(int ply)
   if (m_player_confirm_num[ply] < 1)
     return;
 
+  // skip if we're not missing any inputs from this player
+  if (m_player_confirm_num[ply] > m_forward_frame)
+  {
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "skipping predictions for port {}, confirm_num {}", ply,
+                 m_player_confirm_num[ply]);
+    return;
+  }
+
   INFO_LOG_FMT(EXPANSIONINTERFACE, "updating predictions for port {} from frames {} to {}", ply,
                m_player_confirm_num[ply], m_forward_frame);
 
@@ -782,25 +806,40 @@ u32 CEXIStarpole::Netsync_GetLocalInputNum()
 }
 
 // Recording
+void CEXIStarpole::ModSave_Receive(u8* read_ptr, u32 size)
+{
+  // create replay file
+  CreateFile(GenerateReplayFilename());
+
+  // create header and write it to the file
+  StarpoleReplayHeader header;
+  header.offset.mod_save = sizeof(StarpoleReplayHeader);
+  header.offset.match = header.offset.mod_save + size;
+  header.offset.results = header.offset.match + sizeof(StarpoleDataMatch);
+  header.offset.frame = header.offset.results + 0;
+  WriteFile((u8 *)&header, sizeof(StarpoleReplayHeader));
+
+  // write mod save data
+  WriteFile(read_ptr, size);
+
+}
 void CEXIStarpole::Match_Receive(u8 *read_ptr, u32 size)
 {
-  memcpy((void*)&match_data, read_ptr, size);
+  memcpy((void*)&m_match_data, read_ptr, size);
 
   int active_ply_num = 0;
   for (int i = 0; i < 4; i++)
   {
-    if (match_data.ply_desc[i].p_kind != 4)
+    if (m_match_data.ply_desc[i].p_kind != 4)
       active_ply_num++;
   }
 
   //INFO_LOG_FMT(EXPANSIONINTERFACE,
   //             "Received {}p match being played on gr_kind {} with stadium {}. RNG Seed: {:08x}",
-  //             active_ply_num, match_data.stage_kind.ToHost(), match_data.stadium_kind,
-  //             match_data.rng_seed.ToHost());
+  //             active_ply_num, m_match_data.stage_kind.ToHost(), m_match_data.stadium_kind,
+  //             m_match_data.rng_seed.ToHost());
 
-  // create a file
-  CreateFile(GenerateReplayFilename());
-  WriteFile((uint8_t*)&match_data, size);
+  WriteFile((uint8_t*)&m_match_data, size);
   replay_state = STARPOLE_REPLAYSTATE_RECORD;
 }
 void CEXIStarpole::Frame_Receive(u8* read_ptr, u32 size)
@@ -840,8 +879,10 @@ void CEXIStarpole::End_Receive()
 {
   int terminator = -1;
   WriteFile((uint8_t*)&terminator, sizeof(terminator));
-  CloseFile();
 
+  // go back and write results i guess
+
+  CloseFile();
 
   INFO_LOG_FMT(EXPANSIONINTERFACE, "Match end.");
 }
@@ -851,7 +892,12 @@ int CEXIStarpole::Match_Prepare()
 {
   try
   {
+    // open file
     OpenFile(replay_file_path);
+
+    // read in header
+    ReadFileOffset((uint8_t*)&m_replay_header, 0, sizeof(StarpoleReplayHeader));
+
     return 1;
   }
   catch (const std::exception& e)
@@ -860,15 +906,28 @@ int CEXIStarpole::Match_Prepare()
     return 0;
   }
 }
+void CEXIStarpole::ModSave_Send(u8* write_ptr)
+{
+  StarpoleDataModSave mod_save;
+  ReadFileOffset((uint8_t*)&mod_save, m_replay_header.offset.mod_save, sizeof(StarpoleDataModSave));
+
+  // read mod save
+  u32 mod_save_size = mod_save.size.ToHost();
+  std::vector<uint8_t> mod_save_buffer(mod_save_size);
+  ReadFileOffset((uint8_t*)mod_save_buffer.data(), m_replay_header.offset.mod_save, mod_save_size);
+
+  // write to game memory
+  memcpy(write_ptr, (void*)mod_save_buffer.data(), mod_save_size);
+}
 void CEXIStarpole::Match_Send(u8* write_ptr)
 {
   // read match data
-  ReadFileOffset((uint8_t*)&match_data, 0, sizeof(match_data));
+  ReadFileOffset((uint8_t*)&m_match_data, m_replay_header.offset.match, sizeof(m_match_data));
 
   // write to game memory
-  memcpy(write_ptr, (void*)&match_data, sizeof(match_data));
+  memcpy(write_ptr, (void*)&m_match_data, sizeof(m_match_data));
   
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "Frame Size 0x{:X}", match_data.frame_size.ToHost());
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Frame Size 0x{:X}", m_match_data.frame_size.ToHost());
 
   m_file_frame_idx = 0;
   m_game_frame_idx = 0;
@@ -876,8 +935,8 @@ void CEXIStarpole::Match_Send(u8* write_ptr)
 }
 int CEXIStarpole::Frame_Prepare(int index)
 {
-  int frame_size = match_data.frame_size.ToHost();
-  int offset = sizeof(StarpoleDataMatch) + m_file_frame_idx * frame_size;
+  int frame_size = m_match_data.frame_size.ToHost();
+  int offset = m_replay_header.offset.frame + m_file_frame_idx * frame_size;
   int file_size = ReadFileSize();
 
   if (offset + frame_size > file_size)
@@ -891,7 +950,6 @@ void CEXIStarpole::Frame_Send(u8* write_ptr, u32 index)
   StarpoleDataFrame frame;
   Frame_Get(&frame, index);
 
-
   // write to game memory
   memcpy(write_ptr, (void*)&frame, sizeof(frame));
 
@@ -900,10 +958,10 @@ void CEXIStarpole::Frame_Send(u8* write_ptr, u32 index)
 
 bool CEXIStarpole::Frame_Read(StarpoleDataFrame* frame, u32 file_frame_index)
 {
-  u32 frame_size = match_data.frame_size.ToHost();
+  u32 frame_size = m_match_data.frame_size.ToHost();
   u32 file_size = ReadFileSize();
 
-  int offset = sizeof(StarpoleDataMatch) + file_frame_index * frame_size;
+  int offset = m_replay_header.offset.frame + (file_frame_index * frame_size);
   if (offset + frame_size > file_size)
     return false;
 
