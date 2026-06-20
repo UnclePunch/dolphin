@@ -243,6 +243,11 @@ void GameCubePane::CreateWidgets()
   starpole_layout->addWidget(m_starpole_delay_frames, 0, 1);
   starpole_row++;
 
+  m_starpole_replay_usernames =
+      new ConfigBool(tr("Display Usernames in Replays"), Config::MAIN_STARPOLE_REPLAY_USERNAMES);
+  starpole_layout->addWidget(m_starpole_replay_usernames, starpole_row, 0, 1, -1);
+  starpole_row++;
+
   m_starpole_replay_rollback =
       new ConfigBool(tr("Display Rollbacks in Replays"), Config::MAIN_STARPOLE_REPLAY_ROLLBACK);
   starpole_layout->addWidget(m_starpole_replay_rollback, starpole_row, 0, 1, -1);

@@ -87,6 +87,7 @@ private:
   QPushButton* m_gba_browse_saves;
   ConfigUserPath* m_gba_saves_edit;
 
-  ConfigBool* m_starpole_replay_rollback;
   ConfigInteger* m_starpole_delay_frames;
+  ConfigBool* m_starpole_replay_usernames;
+  ConfigBool* m_starpole_replay_rollback;
 };

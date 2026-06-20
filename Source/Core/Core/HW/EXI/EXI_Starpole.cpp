@@ -129,15 +129,31 @@ u32 CEXIStarpole::ImmRead(u32 size)
   case STARPOLE_CMD_CHECKPLAYBACK:
     if (is_playback_queued)
     {
+      try
+      {
+        // open file
+        OpenFile(replay_file_path);
+
+        // read in header
+        ReadFileOffset((uint8_t*)&m_replay_header, 0, sizeof(StarpoleReplayHeader));
+
+        response = 1;
+      }
+      catch (const std::exception& e)
+      {
+        ERROR_LOG_FMT(EXPANSIONINTERFACE, "{}", e.what());
+
+        response = 0;
+      }
+
       is_playback_queued = 0;
-      response = 1;
     }
     else
       response = 0;
     break;
 
   case STARPOLE_CMD_DOLPHIN:
-    response = 1; // NetPlay::IsNetPlayRunning()
+    response = DolphinData_Prepare();
     break;
 
   case STARPOLE_CMD_NETSTART:     // game is sending preserve sections
@@ -281,7 +297,7 @@ void CEXIStarpole::DMARead(u32 address, u32 size)
     Frame_Send(write_ptr, cur_args);
     break;
   case STARPOLE_CMD_DOLPHIN:
-    Dolphin_SendInfo(write_ptr);
+    DolphinData_Send(write_ptr);
     break;
   case STARPOLE_CMD_NETPADRECV:
     Netsync_SendInputs(write_ptr);
@@ -314,7 +330,7 @@ bool CEXIStarpole::CheckActive()
 }
 
 // Dolphin
-void CEXIStarpole::Dolphin_CreateNetplayData(StarpoleDataNetplay *netplay)
+void CEXIStarpole::DolphinData_Create(StarpoleDataNetplay *netplay)
 {
   memset(netplay, 0, sizeof(*netplay));
 
@@ -360,14 +376,7 @@ void CEXIStarpole::Dolphin_CreateNetplayData(StarpoleDataNetplay *netplay)
 
   return;
 }
-void CEXIStarpole::Dolphin_SendInfo(u8* write_ptr)
-{
-  StarpoleDataNetplay netplay;
-  Dolphin_CreateNetplayData(&netplay);
 
-  // write to game memory
-  memcpy(write_ptr, (void*)&netplay, sizeof(netplay));
-}
 void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
 {
   GCPadStatus* status = (GCPadStatus*)read_ptr;
@@ -865,7 +874,7 @@ void CEXIStarpole::Match_Receive(u8 *read_ptr, u32 size)
 
   // add netplay data
   StarpoleDataNetplay netplay;
-  Dolphin_CreateNetplayData(&netplay);
+  DolphinData_Create(&netplay);
 
   WriteFile((uint8_t*)&netplay, sizeof(netplay));
   
@@ -918,21 +927,7 @@ void CEXIStarpole::End_Receive()
 // Playback
 int CEXIStarpole::Match_Prepare()
 {
-  try
-  {
-    // open file
-    OpenFile(replay_file_path);
-
-    // read in header
-    ReadFileOffset((uint8_t*)&m_replay_header, 0, sizeof(StarpoleReplayHeader));
-
-    return 1;
-  }
-  catch (const std::exception& e)
-  {
-    ERROR_LOG_FMT(EXPANSIONINTERFACE, "{}", e.what());
-    return 0;
-  }
+  return 1;
 }
 void CEXIStarpole::ModSave_Send(u8* write_ptr)
 {
@@ -960,6 +955,38 @@ void CEXIStarpole::Match_Send(u8* write_ptr)
   m_file_frame_idx = 0;
   m_game_frame_idx = 0;
   replay_state = STARPOLE_REPLAYSTATE_PLAYBACK;
+}
+
+int CEXIStarpole::DolphinData_Prepare()
+{
+  // first handle what we can assume to be the game requesting dolphin data on bootup
+  if (replay_state != STARPOLE_REPLAYSTATE_PLAYBACK)
+    return 1;
+
+  // next handle a replay requesting the dolphin data in the replay
+  if (replay_state == STARPOLE_REPLAYSTATE_PLAYBACK &&
+      Config::Get(Config::MAIN_STARPOLE_REPLAY_USERNAMES) &&
+      m_replay_header.offset.netplay != -1)  // check if netplay data exists in the replay
+  {
+      return 1;
+  }
+
+  return 0;
+}
+void CEXIStarpole::DolphinData_Send(u8* write_ptr)
+{
+  StarpoleDataNetplay netplay;
+
+  if (replay_state == STARPOLE_REPLAYSTATE_PLAYBACK)
+  {
+    // read in
+    ReadFileOffset((uint8_t*)&netplay, m_replay_header.offset.netplay, sizeof(netplay));
+  }
+  else
+    DolphinData_Create(&netplay);
+
+  // write to game memory
+  memcpy(write_ptr, (void*)&netplay, sizeof(netplay));
 }
 
 int CEXIStarpole::Frame_Prepare(int index)
@@ -1223,10 +1250,13 @@ int CEXIStarpole::GetLocalNetplayIndex()
 
 void CEXIStarpole::SetReplay(std::string path)
 {
+  // set paths
   replay_file_path = path;
   is_playback_queued = 1;
-  INFO_LOG_FMT(EXPANSIONINTERFACE,
-               "Set replay file to {}", replay_file_path);
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Set replay file to {}", replay_file_path);
+
+  return;
 }
 
 static DolDataSection m_preserve_sections[] = {

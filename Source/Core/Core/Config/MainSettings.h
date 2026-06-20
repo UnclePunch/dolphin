@@ -228,8 +228,9 @@ extern const Info<bool> MAIN_GBA_THREADS;
 #endif
 
 // Main.Starpole
-extern const Info<bool> MAIN_STARPOLE_REPLAY_ROLLBACK;
 extern const Info<int> MAIN_STARPOLE_NET_DELAY;
+extern const Info<bool> MAIN_STARPOLE_REPLAY_ROLLBACK;
+extern const Info<bool> MAIN_STARPOLE_REPLAY_USERNAMES;
 
 // Main.Network
 

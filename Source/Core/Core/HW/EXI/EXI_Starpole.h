@@ -526,8 +526,9 @@ private:
   void TransferByte(u8& byte) override;
 
   // Netplay
-  void Dolphin_CreateNetplayData(StarpoleDataNetplay* netplay);
-  void Dolphin_SendInfo(u8* write_ptr);
+  int DolphinData_Prepare();
+  void DolphinData_Create(StarpoleDataNetplay* netplay);
+  void DolphinData_Send(u8* write_ptr);
   void Netsync_ReceiveInputs(u8* read_ptr, u32 size);
   void Netsync_SendInputs(u8* write_ptr);
   void Netsync_Init(bool is_rollback_active, u32 input_delay);
