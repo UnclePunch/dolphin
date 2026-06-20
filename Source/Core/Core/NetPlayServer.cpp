@@ -1275,14 +1275,17 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
         return 1;
       }
 
-      bool is_rollback;
+      u32 state_hash;
+      packet >> state_hash;
+
+      u16 is_rollback;
       packet >> is_rollback;
+
+      u16 instance_idx;
+      packet >> instance_idx;
 
       u32 frame;
       packet >> frame;
-
-      u32 instance_idx;
-      packet >> instance_idx;
 
       GCPadStatus pad;
 
@@ -1292,7 +1295,7 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
           pad.substickY >> pad.triggerLeft >> pad.triggerRight >> pad.isConnected;
 
       // place in outgoing packet
-      spac << map << is_rollback << frame << instance_idx << pad.button;
+      spac << map << state_hash << is_rollback << instance_idx << frame << pad.button;
       spac << pad.analogA << pad.analogB << pad.stickX << pad.stickY << pad.substickX
            << pad.substickY << pad.triggerLeft << pad.triggerRight << pad.isConnected;
       

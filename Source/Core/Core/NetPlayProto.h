@@ -260,10 +260,11 @@ struct PadDetails
 
 struct GameInput
 {
-  GCPadStatus status;
-  bool is_rollback;
-  u32 instance_idx;
+  u32 state_hash;
+  u16 is_rollback;    // 15 bits here are essentially unused, may utilize in the future
+  u16 instance_idx;
   u32 frame;
+  GCPadStatus status;
 };
 
 std::string GetPlayerMappingString(PlayerId pid, const PadMappingArray& pad_map,

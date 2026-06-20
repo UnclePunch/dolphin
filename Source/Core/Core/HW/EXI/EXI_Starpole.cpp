@@ -379,10 +379,7 @@ void CEXIStarpole::DolphinData_Create(StarpoleDataNetplay *netplay)
 
 void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
 {
-  GCPadStatus* status = (GCPadStatus*)read_ptr;
-  //NetPad *frame_pads = m_pad_buffer[m_pad_head];
-
-  // to-do: check if the buffer is full and skip receiving game frame and sending inputs
+  StarpoleDataInputs* inputs = (StarpoleDataInputs*)read_ptr;
 
   if (0)
   {
@@ -392,11 +389,11 @@ void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
     INFO_LOG_FMT(EXPANSIONINTERFACE, "received from game:");
     for (int i = 0; i < 4; i++)
     {
-      if (status[i].isConnected)
+      if (inputs->status[i].isConnected)
         continue;
 
-      INFO_LOG_FMT(EXPANSIONINTERFACE, " port {} ({}:{}) 0x{:04X}", i, (s8)status[i].stickX,
-                   (s8)status[i].stickY, status[i].button);
+      INFO_LOG_FMT(EXPANSIONINTERFACE, " port {} ({}:{}) 0x{:04X}", i, (s8)inputs->status[i].stickX,
+                   (s8)inputs->status[i].stickY, inputs->status[i].button);
     }
   }
 
@@ -407,7 +404,7 @@ void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
   */
 
   // send to netplay clients
-  NetPlay_SendGameInput((GCPadStatus*)status);
+  NetPlay_SendGameInput(inputs->status, inputs->hash);
 }
 void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
 {
@@ -476,7 +473,7 @@ void CEXIStarpole::Netsync_Init(bool is_rollback_active, u32 input_delay)
   {
     GCPadStatus pad[4];
     memset(pad, 0, sizeof(pad));
-    NetPlay_SendGameInput(pad);
+    NetPlay_SendGameInput(pad, 0);
   }
 }
 

@@ -1546,9 +1546,10 @@ void NetPlayClient::OnGameInput(sf::Packet& packet)
 
     GameInput input;
 
+    packet >> input.state_hash;
     packet >> input.is_rollback;
-    packet >> input.frame;
     packet >> input.instance_idx;
+    packet >> input.frame;
     packet >> input.status.button;
     packet >> input.status.analogA >> input.status.analogB >> input.status.stickX >>
         input.status.stickY >> input.status.substickX >> input.status.substickY >>
@@ -1559,9 +1560,9 @@ void NetPlayClient::OnGameInput(sf::Packet& packet)
     m_game_buffer.at(map).Push(input);
     m_gc_pad_event.Set();
 
-    INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE NetPlay, received frame {} {} inputs for player {} ({}, {}) 0x{:04X}",
-                  input.frame, (input.is_rollback) ? "rollback" : "delay", map, (s8)input.status.stickX,
-                 (s8)input.status.stickY, input.status.button);
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE NetPlay, received frame {} ({:08X}) {} inputs for player {} ({}, {}) 0x{:04X}",
+        input.frame, input.state_hash, (input.is_rollback) ? "rollback" : "delay", map,
+        (s8)input.status.stickX, (s8)input.status.stickY, input.status.button);
   }
 
 }
@@ -2247,7 +2248,7 @@ bool NetPlayClient::GetPlayerGameInput(int pad_nb, GameInput* input)
 }
 
 // called from ---CPU--- thread
-bool NetPlayClient::SendGameInput(GCPadStatus* status, u32 frame, u32 instance_idx, bool is_rollback)
+bool NetPlayClient::SendGameInput(GCPadStatus* status, u32 frame, u32 instance_idx, bool is_rollback, u32 state_hash)
 {
   for (int i = 0; i < 4; i++)
   {
@@ -2263,9 +2264,10 @@ bool NetPlayClient::SendGameInput(GCPadStatus* status, u32 frame, u32 instance_i
         int net_pad = LocalPadToInGamePad(local_pad);
 
         GameInput input;
+        input.state_hash = state_hash;
         input.is_rollback = is_rollback;
-        input.frame = frame;
         input.instance_idx = instance_idx;
+        input.frame = frame;
         input.status = status[local_pad];
 
         if (is_rollback)
@@ -2308,9 +2310,10 @@ bool NetPlayClient::SendGameInput(GCPadStatus* status, u32 frame, u32 instance_i
 void NetPlayClient::AddGameInputToPacket(int in_game_pad, const GameInput& input, sf::Packet& packet)
 {
   packet << static_cast<PadIndex>(in_game_pad);
+  packet << input.state_hash;
   packet << input.is_rollback;
-  packet << input.frame;
   packet << input.instance_idx;
+  packet << input.frame;
   packet << input.status.button;
   if (!m_gba_config[in_game_pad].enabled)
   {
@@ -2319,7 +2322,8 @@ void NetPlayClient::AddGameInputToPacket(int in_game_pad, const GameInput& input
            << input.status.triggerLeft << input.status.triggerRight << input.status.isConnected;
   }
 
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "sending to clients: frame {} port {} ({}:{}) 0x{:04X}", input.frame, in_game_pad,
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE NetPlay, sending to clients: frame {} ({:08X}) port {} ({}:{}) 0x{:04X}", input.frame, input.state_hash,
+                in_game_pad,
                (s8)input.status.stickX,
                (s8)input.status.stickY, input.status.button);
 }
@@ -3066,7 +3070,7 @@ int SerialInterface::CSIDevice_GCController::NetPlay_InGamePadToLocalPad(int num
   return numPAD;
 }
 
-bool ExpansionInterface::CEXIStarpole::NetPlay_SendGameInput(GCPadStatus* status)
+bool ExpansionInterface::CEXIStarpole::NetPlay_SendGameInput(GCPadStatus* status, u32 state_hash)
 {
   // halt sending inputs if we already sent this frame
   if (m_inputs_sent > (m_forward_frame + m_input_delay))
@@ -3075,7 +3079,7 @@ bool ExpansionInterface::CEXIStarpole::NetPlay_SendGameInput(GCPadStatus* status
   std::lock_guard lk(NetPlay::crit_netplay_client);
 
   if (NetPlay::netplay_client &&
-      NetPlay::netplay_client->SendGameInput(status, m_inputs_sent, m_instance_idx, m_is_rollback_active))
+      NetPlay::netplay_client->SendGameInput(status, m_inputs_sent, m_instance_idx, m_is_rollback_active, state_hash))
   {
     m_inputs_sent++;
     return true;

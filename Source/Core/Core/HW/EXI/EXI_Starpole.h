@@ -292,6 +292,12 @@ typedef struct
 
 typedef struct
 {
+  u32 hash;
+  GCPadStatus status[4];
+} StarpoleDataInputs;
+
+typedef struct
+{
   be_u32 rng_seed;
   be_u16 frame_size;
   be_u16 stage_kind;
@@ -483,7 +489,7 @@ public:
   int GetLocalNetplayIndex();
   void SetReplay(std::string);
 
-  bool NetPlay_SendGameInput(GCPadStatus* status);
+  bool NetPlay_SendGameInput(GCPadStatus* status, u32 state_hash);
   void NetPlay_InitData();
   void NetPlay_DrainPadQueue();
   u32 NetPlay_GetGameRNG();
