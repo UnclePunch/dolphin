@@ -314,10 +314,9 @@ bool CEXIStarpole::CheckActive()
 }
 
 // Dolphin
-void CEXIStarpole::Dolphin_SendInfo(u8* write_ptr)
+void CEXIStarpole::Dolphin_CreateNetplayData(StarpoleDataNetplay *netplay)
 {
-  StarpoleDataNetplay netplay_info;
-  memset(&netplay_info, 0, sizeof(netplay_info));
+  memset(netplay, 0, sizeof(*netplay));
 
   float expected_aspect;
   switch (g_Config.aspect_mode)
@@ -973,15 +972,14 @@ bool CEXIStarpole::Frame_Get(StarpoleDataFrame *frame, u32 index)
 {
   if (!Config::Get(Config::MAIN_STARPOLE_REPLAY_ROLLBACK))
   {
-    u32 cur_file_frame_idx = m_file_frame_idx;
+    u32 rollback_file_offset = 0;
     int target_file_frame_idx = -1;
+    StarpoleDataFrame frame_temp;
 
-    // search until we are MAX_ROLLBACKS_NUM from the desired frame
-    for (int i = 0; i < MAX_ROLLBACK_NUM + 1; i++)
+    u32 forward_frame = index;
+    while (forward_frame <= index + MAX_ROLLBACK_NUM)
     {
-      StarpoleDataFrame frame_temp;
-      u32 this_file_frame_idx = cur_file_frame_idx + i;
-      u32 cur_frame_idx = index + i;
+      u32 this_file_frame_idx = m_file_frame_idx + rollback_file_offset + (forward_frame - index);
 
       if (!Frame_Read(&frame_temp, this_file_frame_idx))
         break;
@@ -989,18 +987,31 @@ bool CEXIStarpole::Frame_Get(StarpoleDataFrame *frame, u32 index)
       u32 this_frame_idx = frame_temp.frame_idx.ToHost();
 
       // check for a rollback
-      if (this_frame_idx < cur_frame_idx)
+      if (this_frame_idx < forward_frame)
       {
         // does the desired frame exist in this rollback?
         if (this_frame_idx <= index)
           target_file_frame_idx = this_file_frame_idx + (index - this_frame_idx);
 
         // get to the end of this rollback sequence
-        cur_file_frame_idx += (cur_frame_idx - this_frame_idx);
+        rollback_file_offset += (forward_frame - this_frame_idx);
       }
-      // the frame we are looking for
-      else if (this_frame_idx == (index))
-        target_file_frame_idx = this_file_frame_idx;
+      else if (this_frame_idx == forward_frame)
+      {
+        // the frame we are looking for
+        if (this_frame_idx == (index))
+          target_file_frame_idx = this_file_frame_idx;
+
+        forward_frame++;
+      }
+      else
+      {
+        ERROR_LOG_FMT(EXPANSIONINTERFACE, "Replay: this_frame_idx {} > forward_frame {}",
+                      this_frame_idx, forward_frame);
+
+        return false;
+      }
+
     }
 
     if (target_file_frame_idx == -1)
