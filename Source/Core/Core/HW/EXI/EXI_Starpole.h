@@ -268,11 +268,18 @@ typedef struct
 
 typedef struct
 {
+  char magic[4];
+  struct
+  {
+    u16 major;
+    u16 minor;
+  } version;
   struct
   {
     u32 mod_save;
     u32 match;
     u32 results;
+    u32 netplay;
     u32 frame;
   } offset;
 } StarpoleReplayHeader;
@@ -321,6 +328,7 @@ typedef struct
     int x2c;          // 0x2c
   }ply_desc[4];
 } StarpoleDataMatch;
+
 typedef struct
 {
   be_float aspect_mult;
@@ -518,6 +526,7 @@ private:
   void TransferByte(u8& byte) override;
 
   // Netplay
+  void Dolphin_CreateNetplayData(StarpoleDataNetplay* netplay);
   void Dolphin_SendInfo(u8* write_ptr);
   void Netsync_ReceiveInputs(u8* read_ptr, u32 size);
   void Netsync_SendInputs(u8* write_ptr);
@@ -535,6 +544,7 @@ private:
   u8 NetPlay_ClampTrigger(u8 val);
 
   // Recording
+  void Replay_Create(u32 modsave_size);
   void ModSave_Receive(u8* read_ptr, u32 size);
   void Match_Receive(u8* read_ptr, u32 size);
   void Frame_Receive(u8* read_ptr, u32 size);

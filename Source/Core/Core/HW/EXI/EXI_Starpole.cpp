@@ -341,11 +341,11 @@ void CEXIStarpole::Dolphin_CreateNetplayData(StarpoleDataNetplay *netplay)
 
   be_float aspect_mult;
   aspect_mult.FromHost(expected_aspect / (4.0f / 3.0f));
-  netplay_info.aspect_mult = aspect_mult;
+  netplay->aspect_mult = aspect_mult;
 
-  netplay_info.is_netplay = be_u32::FromHostValue(NetPlay::IsNetPlayRunning());
-  netplay_info.rng_seed = be_u32::FromHostValue(NetPlay_GetGameRNG());
-  netplay_info.ply = be_s32::FromHostValue(GetLocalNetplayIndex());
+  netplay->is_netplay = be_u32::FromHostValue(NetPlay::IsNetPlayRunning());
+  netplay->rng_seed = be_u32::FromHostValue(NetPlay_GetGameRNG());
+  netplay->ply = be_s32::FromHostValue(GetLocalNetplayIndex());
 
   if (NetPlay::IsNetPlayRunning())
   {
@@ -354,12 +354,19 @@ void CEXIStarpole::Dolphin_CreateNetplayData(StarpoleDataNetplay *netplay)
     {
       NetPlay::PadDetails pad = NetPlay::GetPadDetails(i);
       if (!pad.player_name.empty())
-        strncpy(netplay_info.usernames[i], pad.player_name.c_str(), sizeof(pad.player_name));
+        strncpy(netplay->usernames[i], pad.player_name.c_str(), sizeof(pad.player_name));
     }
   }
 
+  return;
+}
+void CEXIStarpole::Dolphin_SendInfo(u8* write_ptr)
+{
+  StarpoleDataNetplay netplay;
+  Dolphin_CreateNetplayData(&netplay);
+
   // write to game memory
-  memcpy(write_ptr, (void*)&netplay_info, sizeof(netplay_info));
+  memcpy(write_ptr, (void*)&netplay, sizeof(netplay));
 }
 void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
 {
@@ -805,18 +812,34 @@ u32 CEXIStarpole::Netsync_GetLocalInputNum()
 }
 
 // Recording
-void CEXIStarpole::ModSave_Receive(u8* read_ptr, u32 size)
+void CEXIStarpole::Replay_Create(u32 modsave_size)
 {
   // create replay file
   CreateFile(GenerateReplayFilename());
 
-  // create header and write it to the file
-  StarpoleReplayHeader header;
-  header.offset.mod_save = sizeof(StarpoleReplayHeader);
-  header.offset.match = header.offset.mod_save + size;
-  header.offset.results = header.offset.match + sizeof(StarpoleDataMatch);
-  header.offset.frame = header.offset.results + 0;
-  WriteFile((u8 *)&header, sizeof(StarpoleReplayHeader));
+  // create header
+  memset(&m_replay_header, -1, sizeof(m_replay_header));
+
+  memcpy(&m_replay_header.magic, "KBRP", sizeof(m_replay_header.magic));
+  m_replay_header.version.major = 0;
+  m_replay_header.version.minor = 0;
+
+  // set pointers
+  int offset = sizeof(m_replay_header);
+  m_replay_header.offset.mod_save = offset;
+  offset += modsave_size;
+  m_replay_header.offset.match = offset;
+  offset += sizeof(StarpoleDataMatch);
+  m_replay_header.offset.netplay = offset;
+  offset += sizeof(StarpoleDataNetplay);
+  m_replay_header.offset.frame = offset;
+
+  // write header to replay
+  WriteFile((u8*)&m_replay_header, sizeof(m_replay_header));
+}
+void CEXIStarpole::ModSave_Receive(u8* read_ptr, u32 size)
+{
+  Replay_Create(size);
 
   // write mod save data
   WriteFile(read_ptr, size);
@@ -826,13 +849,12 @@ void CEXIStarpole::Match_Receive(u8 *read_ptr, u32 size)
 {
   memcpy((void*)&m_match_data, read_ptr, size);
 
-  int active_ply_num = 0;
-  for (int i = 0; i < 4; i++)
-  {
-    if (m_match_data.ply_desc[i].p_kind != 4)
-      active_ply_num++;
-  }
-
+  //int active_ply_num = 0;
+  //for (int i = 0; i < 4; i++)
+  //{
+  //  if (m_match_data.ply_desc[i].p_kind != 4)
+  //    active_ply_num++;
+  //}
   //INFO_LOG_FMT(EXPANSIONINTERFACE,
   //             "Received {}p match being played on gr_kind {} with stadium {}. RNG Seed: {:08x}",
   //             active_ply_num, m_match_data.stage_kind.ToHost(), m_match_data.stadium_kind,
@@ -840,6 +862,13 @@ void CEXIStarpole::Match_Receive(u8 *read_ptr, u32 size)
 
   WriteFile((uint8_t*)&m_match_data, size);
   replay_state = STARPOLE_REPLAYSTATE_RECORD;
+
+  // add netplay data
+  StarpoleDataNetplay netplay;
+  Dolphin_CreateNetplayData(&netplay);
+
+  WriteFile((uint8_t*)&netplay, sizeof(netplay));
+  
 }
 void CEXIStarpole::Frame_Receive(u8* read_ptr, u32 size)
 {
@@ -932,6 +961,7 @@ void CEXIStarpole::Match_Send(u8* write_ptr)
   m_game_frame_idx = 0;
   replay_state = STARPOLE_REPLAYSTATE_PLAYBACK;
 }
+
 int CEXIStarpole::Frame_Prepare(int index)
 {
   int frame_size = m_match_data.frame_size.ToHost();
