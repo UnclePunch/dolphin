@@ -514,19 +514,19 @@ private:
   int m_local_pid;
   int m_input_delay;
   std::array<Common::SPSCQueue<NetPlay::GameInput>, 4> m_game_queue;
-  NetPad m_pad_buffer[PAD_BUFFER_SIZE][4] = {0};  //
+  NetPad m_rollback_buffer[PAD_BUFFER_SIZE][4] = {0};   //
+  NetPad m_delay_buffer[PAD_BUFFER_SIZE][4] = {0};      //
 
-  u32 m_player_drain_num[4] = {0};                // how many frames of inputs we've drained per player this instance
-  u32 m_player_confirm_num[4] = {0};              // how many frames of inputs we've confirmed per player this instance
-  u32 m_player_input_num[4] = {0};                // total number frames of inputs we've received per player across the whole session, used for accessing the circular array
+  u32 m_player_drain_num[4] = {0};                // how many frames of inputs we've drained per player this instance. is relative to m_forward_frame
+  u32 m_player_confirm_num[4] = {0};              // how many frames of inputs we've confirmed per player this instance. is relative to m_forward_frame
   u8 m_player_pad_map[4] = {0};                   // which ports are present
   int m_sim_frames = 0;                           // how many frames the game should simulate this tick
   bool m_is_sim_forward;                          // whether or not we are simulating forward this update
   u32 m_rollback_num;                             // number of frames we rollback this update
   u32 m_confirm_frame;                            // used to know when we are in a prediction
   u32 m_forward_frame;                            // used for keeping track of the next forward simulation frame
-  u32 m_inputs_sent;
-  u32 m_instance_idx;
+  u32 m_inputs_sent;                              // incremented every time SendGameInput is called. used to prevent sending duplicate inputs for a frame index. also sent over as the input's framestamp (just for debugging)
+  u16 m_instance_idx;                             // number of times we switched between delay and rollback. inputs are stamped with this to know whether or not we should discard old inputs after an instance changes
   u32 m_instance_read_start;
 
   void TransferByte(u8& byte) override;
@@ -543,7 +543,6 @@ private:
   bool Netsync_CheckSimForward();
   u32 Netsync_GetRollbackNum();
   void Netsync_PredictInputs(int ply);
-  u32 Netsync_GetLocalInputNum();
 
   // Input
   u32 NetPlay_HashPadStatus(GCPadStatus* status);

@@ -143,10 +143,9 @@ public:
   };
   bool WiimoteUpdate(const std::span<WiimoteDataBatchEntry>& entries);
   bool GetNetPads(int pad_nb, bool from_vi, GCPadStatus* pad_status);
-  bool SendGameInput(GCPadStatus* status, u32 frame, u32 instance_idx, bool is_rollback, u32 state_hash);
+
+  int SendGameInput(GCPadStatus* status, u32 frame, bool is_rollback, u32 instance_idx, u32 state_hash);
   bool GetPlayerGameInput(int pad_nb, GameInput* input);
-  bool HasGameInputForAll();
-  bool GetGameInput(GameInput* input);
   void AddGameInputToPacket(int in_game_pad, const GameInput& np, sf::Packet& packet);
 
   u64 GetInitialRTCValue() const;
@@ -179,6 +178,7 @@ public:
   const PadMappingArray& GetWiimoteMapping() const;
 
   void AdjustPadBufferSize(unsigned int size);
+  unsigned int GetPadBufferSize();
 
   void SetWiiSyncData(std::unique_ptr<IOS::HLE::FS::FileSystem> fs, std::vector<u64> titles,
                       std::string redirect_folder);
