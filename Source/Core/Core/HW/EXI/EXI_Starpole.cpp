@@ -215,7 +215,7 @@ u32 CEXIStarpole::ImmRead(u32 size)
     break;
 
   case STARPOLE_CMD_NETGETCONFIRM:
-    response = m_confirm_frame;
+    response = m_confirm_frame - m_instance_read_start;
     break;
 
   case STARPOLE_CMD_NETGAMESTATE:

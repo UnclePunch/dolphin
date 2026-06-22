@@ -3067,8 +3067,8 @@ bool ExpansionInterface::CEXIStarpole::NetPlay_SendGameInput(GCPadStatus* status
 
   u32 input_delay = NetPlay_GetDelay();
 
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "NetPlay_SendGameInput: m_inputs_sent: {}. m_forward_frame: {}. input_delay {}",
-               m_inputs_sent, m_forward_frame, input_delay);
+  //INFO_LOG_FMT(EXPANSIONINTERFACE, "NetPlay_SendGameInput: m_inputs_sent: {}. m_forward_frame: {}. input_delay {}",
+  //             m_inputs_sent, m_forward_frame, input_delay);
 
   // halt sending inputs if we already sent this frame
   if (m_inputs_sent > (m_forward_frame + input_delay))
@@ -3131,8 +3131,8 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
       // read game state hash
       m_player_gamestate_frame[i] = input.game_state.frame;
       m_player_gamestate_hash[i] = input.game_state.hash;
-      INFO_LOG_FMT(EXPANSIONINTERFACE, "  got game state hash for port {} frame {}: {:08X}.", i,
-                   input.game_state.frame, input.game_state.hash);
+      //INFO_LOG_FMT(EXPANSIONINTERFACE, "  got game state hash for port {} frame {}: {:08X}.", i,
+      //             input.game_state.frame, input.game_state.hash);
 
       // discard inputs from a previous instance
       if (input.instance_idx < m_instance_idx)
@@ -3141,13 +3141,6 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
                      "  discarding drained input port {} frame {} from previous instance {}", i,
                      input.frame, input.instance_idx);
         continue;
-      }
-
-      if (input.instance_idx > m_instance_idx)
-      {
-        INFO_LOG_FMT(EXPANSIONINTERFACE,
-                     "  draining input port {} frame {} from future instance {}", i,
-                     input.frame, input.instance_idx);
       }
 
       // get this frame's input data for this player
