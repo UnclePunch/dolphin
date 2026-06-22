@@ -1275,6 +1275,9 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
         return 1;
       }
 
+      u32 state_frame;
+      packet >> state_frame;
+
       u32 state_hash;
       packet >> state_hash;
 
@@ -1295,7 +1298,7 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
           pad.substickY >> pad.triggerLeft >> pad.triggerRight >> pad.isConnected;
 
       // place in outgoing packet
-      spac << map << state_hash << is_rollback << instance_idx << frame << pad.button;
+      spac << map << state_frame << state_hash << is_rollback << instance_idx << frame << pad.button;
       spac << pad.analogA << pad.analogB << pad.stickX << pad.stickY << pad.substickX
            << pad.substickY << pad.triggerLeft << pad.triggerRight << pad.isConnected;
       

@@ -39,8 +39,10 @@ CEXIStarpole::CEXIStarpole(Core::System& system, const std::string& name)
 
   SaveState_End();
 
+  memset(m_gamestate_hash_buffer, 0, sizeof(m_gamestate_hash_buffer));
   memset(m_delay_buffer, -1, sizeof(m_delay_buffer));
   memset(m_rollback_buffer, -1, sizeof(m_rollback_buffer));
+  
 
   INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI Starpole Init");
 }
@@ -59,10 +61,14 @@ void CEXIStarpole::DoState(PointerWrap& p)
   p.Do(m_savestate_size);
   p.Do(m_is_sim_forward);
   p.Do(m_savestate_num);
+
   p.DoArray(m_delay_buffer, sizeof(m_delay_buffer) / sizeof(m_delay_buffer[0]));
   p.DoArray(m_rollback_buffer, sizeof(m_rollback_buffer) / sizeof(m_rollback_buffer[0]));
+  p.DoArray(m_player_gamestate_frame, sizeof(m_player_gamestate_frame) / sizeof(m_player_gamestate_frame[0]));
   p.DoArray(m_player_drain_num, sizeof(m_player_drain_num) / sizeof(m_player_drain_num[0]));
   p.DoArray(m_player_confirm_num, sizeof(m_player_confirm_num) / sizeof(m_player_confirm_num[0]));
+  p.DoArray(m_player_gamestate_hash, sizeof(m_player_gamestate_hash) / sizeof(m_player_gamestate_hash[0]));
+
   p.Do(m_sim_frames);
   p.Do(m_confirm_frame);
   p.Do(m_forward_frame);
@@ -165,15 +171,7 @@ u32 CEXIStarpole::ImmRead(u32 size)
     break;
 
   case STARPOLE_CMD_NETPADSEND:   // game is sending its inputs
-    // to-do ensure the buffer isnt full?
-    if (1)
-    {
-      // m_forward_frame = cur_args;
-      response = 1;  // signal we are ready to receive the inputs
-    }
-    else
-      response = 0;    // signal we are ready to receive the inputs
-
+    response = 1;  // signal we are ready to receive the inputs
     break;
 
   case STARPOLE_CMD_NETPADRECV:   // game is requesting inputs
@@ -181,15 +179,8 @@ u32 CEXIStarpole::ImmRead(u32 size)
     // check for remote inputs, copy them to our pad buffer and update
     NetPlay_DrainPadQueue();
 
-    // drain inputs and change predicted to corrected
-    // validate predictions
-    // advance confirm frame
-    // update predictions?
-    // check sim forward?
-    // check rollback?
-
     m_is_sim_forward = Netsync_CheckSimForward(); // this is advancing confirm frame
-    m_rollback_num = Netsync_GetRollbackNum();  // this references confirm frame when validating inputs
+    m_rollback_num = Netsync_GetRollbackNum();    // this references confirm frame when validating inputs
 
     // request a load state
     if (m_rollback_num > 0)
@@ -225,6 +216,10 @@ u32 CEXIStarpole::ImmRead(u32 size)
 
   case STARPOLE_CMD_NETGETCONFIRM:
     response = m_confirm_frame;
+    break;
+
+  case STARPOLE_CMD_NETGAMESTATE:
+    response = 1;
     break;
 
   case STARPOLE_CMD_NETEND:
@@ -277,6 +272,9 @@ void CEXIStarpole::DMAWrite(u32 address, u32 size)
     break;
   case STARPOLE_CMD_NETPADSEND:
     Netsync_ReceiveInputs(read_ptr, size);
+    break;
+  case STARPOLE_CMD_NETGAMESTATE:
+    Netsync_ReceiveGameState(read_ptr, size);
     break;
 
   default:
@@ -391,6 +389,43 @@ void CEXIStarpole::DolphinData_Create(StarpoleDataNetplay *netplay)
   return;
 }
 
+void CEXIStarpole::Netsync_ReceiveGameState(u8* read_ptr, u32 size)
+{
+  StarpoleDataGameState* state = (StarpoleDataGameState*)read_ptr;
+
+  // index hash
+  int frame_idx = state->frame.ToHost() + m_instance_read_start;
+  m_gamestate_hash_buffer[frame_idx % PAD_BUFFER_SIZE] = state->hash.ToHost();
+
+  // compare hashes with players
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Checking for desyncs...");
+  for (int ply = 0; ply < 4; ply++)
+  {
+    if (m_player_pad_map[ply] == 0 || m_player_pad_map[ply] == m_local_pid)
+      continue;
+
+    // get their most recent hash
+    u32 their_hash = m_player_gamestate_hash[ply];
+    u32 their_frame = m_player_gamestate_frame[ply];
+
+    // ensure i have a hash for this frame
+    if (their_frame >= m_forward_frame)
+      continue;
+
+    u32 my_hash = m_gamestate_hash_buffer[their_frame % PAD_BUFFER_SIZE];
+
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "  local hash: {:08X} vs port {} {:08X} on frame {}", my_hash,
+                 ply, their_hash, their_frame);
+
+    if (my_hash != their_hash)
+    {
+      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Desync detected from port {} on frame {}",
+                    m_player_pad_map[ply], their_frame);
+    }
+  }
+
+}
+
 void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
 {
   StarpoleDataInputs* inputs = (StarpoleDataInputs*)read_ptr;
@@ -418,7 +453,7 @@ void CEXIStarpole::Netsync_ReceiveInputs(u8* read_ptr, u32 size)
   */
 
   // send to netplay clients
-  NetPlay_SendGameInput(inputs->status, inputs->hash);
+  NetPlay_SendGameInput(inputs->status);
 }
 void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
 {
@@ -487,7 +522,7 @@ void CEXIStarpole::Netsync_Init(bool is_rollback_active, u32 input_delay)
   {
     GCPadStatus pad[4];
     memset(pad, 0, sizeof(pad));
-    NetPlay_SendGameInput(pad, 0);
+    NetPlay_SendGameInput(pad);
   }
 }
 

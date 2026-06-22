@@ -260,7 +260,11 @@ struct PadDetails
 
 struct GameInput
 {
-  u32 state_hash;
+  struct
+  {
+    u32 frame;
+    u32 hash;
+  } game_state;
   u16 is_rollback;    // 15 bits here are essentially unused, may utilize in the future
   u16 instance_idx;
   u32 frame;

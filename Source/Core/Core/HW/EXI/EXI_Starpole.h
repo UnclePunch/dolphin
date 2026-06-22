@@ -212,6 +212,7 @@ typedef enum
   STARPOLE_CMD_NETPADSEND,
   STARPOLE_CMD_NETPADRECV,
   STARPOLE_CMD_NETGETCONFIRM,
+  STARPOLE_CMD_NETGAMESTATE,
   STARPOLE_CMD_NETEND,
 
   // end
@@ -292,7 +293,12 @@ typedef struct
 
 typedef struct
 {
-  u32 hash;
+  be_u32 frame;
+  be_u32 hash;
+} StarpoleDataGameState;
+
+typedef struct
+{
   GCPadStatus status[4];
 } StarpoleDataInputs;
 
@@ -489,7 +495,7 @@ public:
   int GetLocalNetplayIndex();
   void SetReplay(std::string);
 
-  bool NetPlay_SendGameInput(GCPadStatus* status, u32 state_hash);
+  bool NetPlay_SendGameInput(GCPadStatus* status);
   void NetPlay_InitData();
   void NetPlay_DrainPadQueue();
   u32 NetPlay_GetGameRNG();
@@ -514,9 +520,12 @@ private:
   int m_local_pid;
   int m_input_delay;
   std::array<Common::SPSCQueue<NetPlay::GameInput>, 4> m_game_queue;
-  NetPad m_rollback_buffer[PAD_BUFFER_SIZE][4] = {0};   //
-  NetPad m_delay_buffer[PAD_BUFFER_SIZE][4] = {0};      //
+  NetPad m_rollback_buffer[PAD_BUFFER_SIZE][4] = {0};         //
+  NetPad m_delay_buffer[PAD_BUFFER_SIZE][4] = {0};            //
+  u32 m_gamestate_hash_buffer[PAD_BUFFER_SIZE] = {0};           // all local game state hashes
 
+  u32 m_player_gamestate_hash[4] = {0};           // last hash of the game state we've received from each player
+  u32 m_player_gamestate_frame[4] = {0};          // index of the last game state frame we've received from each player
   u32 m_player_drain_num[4] = {0};                // how many frames of inputs we've drained per player this instance. is relative to m_forward_frame
   u32 m_player_confirm_num[4] = {0};              // how many frames of inputs we've confirmed per player this instance. is relative to m_forward_frame
   u8 m_player_pad_map[4] = {0};                   // which ports are present
@@ -536,6 +545,7 @@ private:
   void DolphinData_Create(StarpoleDataNetplay* netplay);
   void DolphinData_Send(u8* write_ptr);
   void Netsync_ReceiveInputs(u8* read_ptr, u32 size);
+  void Netsync_ReceiveGameState(u8* read_ptr, u32 size);
   void Netsync_SendInputs(u8* write_ptr);
   void Netsync_Init(bool is_rollback_active, u32 input_delay);
   int Netsync_GetConfirmedInputNum();
@@ -548,6 +558,7 @@ private:
   u32 NetPlay_HashPadStatus(GCPadStatus* status);
   u8 NetPlay_ClampStick(u8 val);
   u8 NetPlay_ClampTrigger(u8 val);
+  u32 NetPlay_GetDelay();
 
   // Recording
   void Replay_Create(u32 modsave_size);
