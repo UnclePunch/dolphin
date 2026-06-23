@@ -287,8 +287,8 @@ void CEXIStarpole::DMAWrite(u32 address, u32 size)
 
 void CEXIStarpole::DMARead(u32 address, u32 size)
 {
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE DMA Response to cmd {}: {:08x} bytes, from EXI device to {:08x}",
-               (int)cur_cmd, size, address);
+  //INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE DMA Response to cmd {}: {:08x} bytes, from EXI device to {:08x}",
+  //             (int)cur_cmd, size, address);
 
   // get pointer to address we will write to
   u8* write_ptr = m_system.GetMemory().GetPointerForRange(address, size);
@@ -414,15 +414,18 @@ void CEXIStarpole::Netsync_ReceiveGameState(u8* read_ptr, u32 size)
 
     u32 my_hash = m_gamestate_hash_buffer[their_frame % PAD_BUFFER_SIZE];
 
-    INFO_LOG_FMT(EXPANSIONINTERFACE, "  local hash: {:08X} vs port {} {:08X} on frame {}", my_hash,
-                 ply, their_hash, their_frame);
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "  frame {}: local {} vs p{} {}", their_frame, my_hash,
+                 ply, their_hash);
 
     if (my_hash != their_hash)
     {
-      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Desync detected from port {} on frame {}",
-                    m_player_pad_map[ply], their_frame);
+      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Desync detected from player {} in port {} on frame {}",
+                    ply, m_player_pad_map[ply], their_frame);
     }
   }
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "");
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "");
 
 }
 
@@ -464,7 +467,6 @@ void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
   NetPad(*pad_buffer)[4] = (m_is_rollback_active) ? m_rollback_buffer : m_delay_buffer;
   int read_frame = (m_forward_frame - m_rollback_num);
 
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "Netsync_SendInputs read_frame: {}", read_frame);
   INFO_LOG_FMT(EXPANSIONINTERFACE, "Sending to game:");
   
   for (int i = 0; i < m_sim_frames; i++)
@@ -472,7 +474,7 @@ void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
     int arr_idx = ((read_frame + i) + PAD_BUFFER_SIZE) % PAD_BUFFER_SIZE;
     int cur_frame = (read_frame + i) - m_instance_read_start;
 
-    INFO_LOG_FMT(EXPANSIONINTERFACE, " Frame {}:", cur_frame);
+    INFO_LOG_FMT(EXPANSIONINTERFACE, " Frame {} ({}):", read_frame + i, cur_frame);
     for (int j = 0; j < 4; j++)
     {
       if (m_player_pad_map[j] == 0)
@@ -580,7 +582,7 @@ u32 CEXIStarpole::Netsync_ValidatePrediction(int ply)
   // get the last confirmed frame we should check
   u32 confirm_end = (m_player_drain_num[ply] > m_forward_frame + 1) ? m_forward_frame + 1 : m_player_drain_num[ply];
 
-  INFO_LOG_FMT(EXPANSIONINTERFACE, "prediction: validating player {} frames {} to {}...", ply,
+  INFO_LOG_FMT(EXPANSIONINTERFACE, " prediction: validating player {} frames {} to {}...", ply,
                m_player_confirm_num[ply], confirm_end);
 
   // we are in a prediction branch and received a past input
@@ -677,8 +679,8 @@ bool CEXIStarpole::Netsync_CheckSimForward()
     if (replay_state == STARPOLE_REPLAYSTATE_PLAYBACK)
       return Playback_CheckSimForward();
 
-    INFO_LOG_FMT(EXPANSIONINTERFACE, "");
-    INFO_LOG_FMT(EXPANSIONINTERFACE, "determining sim_frames for forward_frame {}",
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "Netsync_CheckSimForward:");
+    INFO_LOG_FMT(EXPANSIONINTERFACE, " determining sim_frames for forward_frame {}",
                  m_forward_frame);
 
     u32 is_sim_forward = false;
@@ -687,7 +689,7 @@ bool CEXIStarpole::Netsync_CheckSimForward()
     // check how many frames of confirmed inputs we have between confirm_frame and forward_frame
     int confirm_num = Netsync_GetConfirmedInputNum();
 
-    INFO_LOG_FMT(EXPANSIONINTERFACE, "confirm_num {}", confirm_num);
+    INFO_LOG_FMT(EXPANSIONINTERFACE, " confirm_num {}", confirm_num);
 
     if (confirm_num > 0)
     {
@@ -699,7 +701,7 @@ bool CEXIStarpole::Netsync_CheckSimForward()
       if (!is_in_prediction)
       {
         // we havent predicted any inputs, meaning the delay buffer has accounted for all lag.
-        INFO_LOG_FMT(EXPANSIONINTERFACE, "rollback: got all inputs in time, moving forward");
+        INFO_LOG_FMT(EXPANSIONINTERFACE, " got all inputs in time, moving forward");
       }
 
       is_sim_forward = true;  // simulate forward
@@ -720,13 +722,13 @@ bool CEXIStarpole::Netsync_CheckSimForward()
         // confirmed frames
         is_sim_forward = false;
 
-        INFO_LOG_FMT(EXPANSIONINTERFACE, "rollback: STALLING. max prediction frames reached.");
+        INFO_LOG_FMT(EXPANSIONINTERFACE, " STALLING. max prediction frames reached.");
       }
       else
       {
         is_sim_forward = true;
 
-        INFO_LOG_FMT(EXPANSIONINTERFACE, "rollback: input missing. advancing to prediction #{}",
+        INFO_LOG_FMT(EXPANSIONINTERFACE, " input missing. advancing to prediction #{}",
                      m_forward_frame - m_confirm_frame);
       }
     }
@@ -734,13 +736,13 @@ bool CEXIStarpole::Netsync_CheckSimForward()
     {
       // lets branch off to a prediction
       INFO_LOG_FMT(EXPANSIONINTERFACE,
-                   "rollback: input missing. starting a prediction branch!");
+                   " input missing. starting a prediction branch!");
 
       is_sim_forward = true;
     }
 
     INFO_LOG_FMT(EXPANSIONINTERFACE,
-                 "rollback: performing {} sim_frames at forward_frame {} | confirm_frame {}",
+                 " performing {} sim_frames at forward_frame {} | confirm_frame {}",
                  is_sim_forward, m_forward_frame, m_confirm_frame);
 
     return is_sim_forward;
@@ -777,6 +779,8 @@ u32 CEXIStarpole::Netsync_GetRollbackNum()
       return 0;
   }
 
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Netsync_GetRollbackNum:");
+
   // validate newly received player inputs
   for (int i = 0; i < 4; i++)
   {
@@ -787,6 +791,7 @@ u32 CEXIStarpole::Netsync_GetRollbackNum()
   }
 
   // predict missing inputs
+  // WARNING: i cannot repredict inputs that are not being resimulated
   for (int i = 0; i < 4; i++)
     Netsync_PredictInputs(i);
 
@@ -833,13 +838,18 @@ void CEXIStarpole::Netsync_PredictInputs(int ply)
 u32 ExpansionInterface::CEXIStarpole::NetPlay_HashPadStatus(GCPadStatus* status)
 {
   u32 h = 0;
-  h = h * 131 + status->button;
-  h = h * 131 + status->stickX;
-  h = h * 131 + status->stickY;
-  h = h * 131 + status->substickX;
-  h = h * 131 + status->substickY;
-  h = h * 131 + status->triggerLeft;
-  h = h * 131 + status->triggerRight;
+  auto mix = [](u32 h, u32 v) {
+    h ^= v;
+    h ^= h >> 16;
+    h *= 0x45d9f3b;
+    h ^= h >> 16;
+    return h;
+  };
+
+  h = mix(h, status->button);
+  h = mix(h, (u32)status->stickX << 8 | (u8)status->stickY);
+  h = mix(h, (u32)status->substickX << 8 | (u8)status->substickY);
+  h = mix(h, (u32)status->triggerLeft << 8 | status->triggerRight);
   return h;
 }
 
