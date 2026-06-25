@@ -73,8 +73,34 @@ void CEXIStarpole::DoState(PointerWrap& p)
   p.Do(m_confirm_frame);
   p.Do(m_forward_frame);
 
-  u32 buffer_size = (u32)m_savestate_size * MAX_SAVESTATES;
+  // replay stuff
+  p.Do(m_replay_header);
+  p.Do(m_match_data);
+  p.Do(m_file_frame_idx);
+  p.Do(m_game_frame_idx);
+  p.Do(replay_state);
+  p.Do(is_active);
+  p.Do(replay_file_path);
+  if (replay_state == STARPOLE_REPLAYSTATE_PLAYBACK)
+  {
+    size_t tell;
+    if (p.IsWriteMode())
+    {
+      // backup tell
+      tell = reader->Tell();
+      p.Do(tell);
+    }
+    else
+    {
+      // restore tell
+      OpenFile(replay_file_path);
+      p.Do(tell);
+      reader->Tell() = tell;
+    }
+  }
 
+  // restore savestates
+  u32 buffer_size = (u32)m_savestate_size * MAX_SAVESTATES;
   bool allocated = m_savestate_alloc != nullptr;
   p.Do(allocated);
   if (allocated)
@@ -1014,7 +1040,8 @@ void CEXIStarpole::End_Receive()
 
   // go back and write results i guess
 
-  CloseFile();
+  CloseWriter();
+  replay_state = STARPOLE_REPLAYSTATE_NONE;
 
   INFO_LOG_FMT(EXPANSIONINTERFACE, "Match end.");
 }
@@ -1091,7 +1118,11 @@ int CEXIStarpole::Frame_Prepare(int index)
   int file_size = ReadFileSize();
 
   if (offset + frame_size > file_size)
+  {
+    CloseReader();
+    replay_state = STARPOLE_REPLAYSTATE_NONE;
     return 0;
+  }
 
   return frame_size;
 }
@@ -1568,7 +1599,7 @@ void CEXIStarpole::SaveState_Init(DolDataSection* read_ptr, u32 section_num)
 
     header->chunk_num = chunk_num;
 
-    u8* this_chunk_data_ptr = (u8*)header + sizeof(SavestateHeader) + (sizeof(SavestateChunk) * chunk_num);
+    size_t this_chunk_data_offset = sizeof(SavestateHeader) + (sizeof(SavestateChunk) * chunk_num);
 
     // init chunks
     for (int chunk_idx = 0; chunk_idx < chunk_num; chunk_idx++)
@@ -1577,9 +1608,9 @@ void CEXIStarpole::SaveState_Init(DolDataSection* read_ptr, u32 section_num)
                                                       (sizeof(SavestateChunk) * chunk_idx));
       chunk->address = chunks[chunk_idx].first;
       chunk->size = chunks[chunk_idx].second;
-      chunk->data_ptr = this_chunk_data_ptr;
+      chunk->data_offset = this_chunk_data_offset;
 
-      this_chunk_data_ptr += chunk->size;
+      this_chunk_data_offset += chunk->size;
     }
   }
 
@@ -1654,7 +1685,7 @@ void CEXIStarpole::SaveState(u32 frame_idx)
     if (ptr)
     {
       auto copy_start = std::chrono::high_resolution_clock::now();
-      memcpy(chunk->data_ptr, ptr, chunk->size);
+      memcpy((u8*)savestate + chunk->data_offset, ptr, chunk->size);
       auto copy_end = std::chrono::high_resolution_clock::now();
 
       auto copy_duration =
@@ -1728,7 +1759,7 @@ void CEXIStarpole::LoadState(u32 frame_idx)
     if (ptr)
     {
       // auto copy_start = std::chrono::high_resolution_clock::now();
-      memcpy(ptr, chunk->data_ptr, chunk->size);
+      memcpy(ptr, (u8*)savestate + chunk->data_offset, chunk->size);
       //auto copy_end = std::chrono::high_resolution_clock::now();
 
       //auto copy_duration =

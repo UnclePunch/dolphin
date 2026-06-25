@@ -170,7 +170,7 @@ struct SavestateChunk
 {
   u32 address;
   u32 size;
-  u8* data_ptr;     // exists in savestate
+  size_t data_offset;  // exists in savestate
 };
 
 struct SavestateHeader
@@ -409,7 +409,7 @@ public:
       throw std::runtime_error("Failed to write chunk to file");
   }
 
-  // Optional: flush to disk
+  // flush to disk
   void Flush() { file.flush(); }
 
 private:
@@ -463,6 +463,14 @@ public:
     return file.tellg();
   }
 
+  void Seek(std::streampos pos)
+  {
+    file.clear();
+    file.seekg(pos);
+  }
+
+  std::streampos Tell() { return file.tellg(); }
+
 private:
   std::ifstream file;
 };
@@ -486,12 +494,26 @@ public:
 
   void CreateFile(const std::string& path) { writer = std::make_unique<StreamWriter>(path); }
   void WriteFile(const uint8_t *data, u32 size) { writer->WriteChunk(data, size); }
-  void CloseFile() { writer->Flush(); }
+  void CloseWriter()
+  {
+    if (writer)
+    {
+      writer->Flush();
+      writer.reset();
+    }
+  }
 
   void OpenFile(const std::string& path) { reader = std::make_unique<StreamReader>(path); }
   void ReadFile(uint8_t* buffer, u32 size) { reader->ReadChunk(buffer, size); }
   void ReadFileOffset(uint8_t* buffer, u32 offset, u32 size) { reader->ReadChunkOffset(buffer, offset, size); }
   std::streamsize ReadFileSize() { return reader->GetFileSize(); }
+  void CloseReader()
+  {
+    if (reader)
+    {
+      reader.reset();
+    }
+  }
 
   std::string GenerateReplayFilename();
   int GetLocalNetplayIndex();
