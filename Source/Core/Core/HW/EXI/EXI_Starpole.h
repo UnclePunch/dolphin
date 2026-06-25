@@ -517,7 +517,7 @@ private:
   static constexpr size_t MAX_DELAY = 99;
   static constexpr size_t PAD_BUFFER_SIZE = MAX_ROLLBACK_NUM + 1 + MAX_DELAY;  // rollback frames + 1 forward sim frame + 2 delay frames
 
-  bool m_is_spectator;
+  bool m_is_spectator = false;
   int m_local_pid;
   int m_input_delay;
   std::array<Common::SPSCQueue<NetPlay::GameInput>, 4> m_game_queue;
