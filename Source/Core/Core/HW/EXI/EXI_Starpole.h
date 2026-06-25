@@ -517,11 +517,16 @@ private:
   static constexpr size_t MAX_DELAY = 99;
   static constexpr size_t PAD_BUFFER_SIZE = MAX_ROLLBACK_NUM + 1 + MAX_DELAY;  // rollback frames + 1 forward sim frame + 2 delay frames
 
+  bool m_is_spectator;
   int m_local_pid;
   int m_input_delay;
   std::array<Common::SPSCQueue<NetPlay::GameInput>, 4> m_game_queue;
-  NetPad m_rollback_buffer[PAD_BUFFER_SIZE][4] = {0};         //
-  NetPad m_delay_buffer[PAD_BUFFER_SIZE][4] = {0};            //
+
+  std::array<Common::SPSCQueue<NetPad>, 4> m_spectate_queue;
+  u32 m_spectate_confirm_num[4] = {0};
+
+  NetPad m_rollback_buffer[PAD_BUFFER_SIZE][4] = {0};           //
+  NetPad m_delay_buffer[PAD_BUFFER_SIZE][4] = {0};              //
   u32 m_gamestate_hash_buffer[PAD_BUFFER_SIZE] = {0};           // all local game state hashes
 
   u32 m_player_gamestate_hash[4] = {0};           // last hash of the game state we've received from each player

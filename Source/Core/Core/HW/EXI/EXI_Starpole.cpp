@@ -475,19 +475,37 @@ void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
     int cur_frame = (read_frame + i) - m_instance_read_start;
 
     INFO_LOG_FMT(EXPANSIONINTERFACE, " Frame {} ({}):", read_frame + i, cur_frame);
+
     for (int j = 0; j < 4; j++)
     {
-      if (m_player_pad_map[j] == 0)
-        m_rollback_buffer[arr_idx][j].status = {.isConnected = 1};
+      NetPad* this_pad;
+      NetPad spectate_pad;
 
-      memcpy(&local_status[i][j], &pad_buffer[arr_idx][j].status, sizeof(GCPadStatus));
+      // get pad
+      if (m_is_spectator)
+      {
+        memset(&spectate_pad, 0, sizeof(spectate_pad));
+
+        if (m_spectate_queue[j].Size() > 0)
+          m_spectate_queue[j].Pop(spectate_pad);
+
+        this_pad = &spectate_pad;
+      }
+      else
+        this_pad = &pad_buffer[arr_idx][j];
+
+      // if pad does not exist, set flag before sending
+      if (m_player_pad_map[j] == 0)
+        this_pad->status = {.isConnected = 1};
+
+      memcpy(&local_status[i][j], &this_pad->status, sizeof(GCPadStatus));
 
       if (m_player_pad_map[j] != 0)
       {
         INFO_LOG_FMT(EXPANSIONINTERFACE, "  port {} ({}:{}) 0x{:04X} (arr_idx {}) state {}", j,
                      (s8) local_status[i][j].stickX,
                      (s8)local_status[i][j].stickY,
-                     local_status[i][j].button, arr_idx, (int)pad_buffer[arr_idx][j].state);
+                     local_status[i][j].button, arr_idx, (int)this_pad->state);
       }
     }
   }
@@ -666,6 +684,29 @@ u32 CEXIStarpole::Netsync_ValidatePrediction(int ply)
 
 bool CEXIStarpole::Netsync_CheckSimForward()
 {
+  if (m_is_spectator)
+  {
+    int present_num = 0;
+
+    // only advance if we are enough frames behind
+    for (int i = 0; i < 4; i++)
+    {
+      // skip if not present
+      if (m_player_pad_map[i] == 0)
+        continue;
+
+      present_num++;
+
+      if (m_spectate_queue[i].Size() == 0)
+        return false;
+    }
+
+    if (present_num > 0)
+      return true;
+    else
+      return false;
+  }
+
   if (m_is_rollback_active)
   {
     // debug case to force a large rollback every N frames
@@ -765,6 +806,9 @@ u32 CEXIStarpole::Netsync_GetRollbackNum()
   u32 rollback_num = 0;
 
   if (!m_is_rollback_active)
+    return 0;
+
+  if (m_is_spectator)
     return 0;
 
   // handle replay rollbacks first
@@ -1484,6 +1528,9 @@ void CEXIStarpole::SaveState_Init(DolDataSection* read_ptr, u32 section_num)
   if (ALWAYS_DELAY)
     return;
 
+  if (m_is_spectator)
+    return;
+
   if (m_savestate_alloc != nullptr)
     SaveState_End();
 
@@ -1545,6 +1592,9 @@ void CEXIStarpole::SaveState_Init(DolDataSection* read_ptr, u32 section_num)
 
 void CEXIStarpole::SaveState_End()
 {
+  if (m_is_spectator)
+    return;
+
   m_savestate_alloc.reset();        // streets are saying this is safe to call on a nullptr
 
   m_savestate_num = 0;

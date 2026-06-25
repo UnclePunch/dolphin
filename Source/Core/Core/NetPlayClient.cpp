@@ -3065,6 +3065,9 @@ bool ExpansionInterface::CEXIStarpole::NetPlay_SendGameInput(GCPadStatus* status
   if (!NetPlay::netplay_client)
     return false;
 
+  if (m_is_spectator)
+    return false;
+
   u32 input_delay = NetPlay_GetDelay();
 
   //INFO_LOG_FMT(EXPANSIONINTERFACE, "NetPlay_SendGameInput: m_inputs_sent: {}. m_forward_frame: {}. input_delay {}",
@@ -3090,12 +3093,16 @@ void ExpansionInterface::CEXIStarpole::NetPlay_InitData()
   if (!NetPlay::netplay_client)
     return;
 
+  m_is_spectator = true;
   m_local_pid = NetPlay::netplay_client->GetLocalPlayerId();
 
   NetPlay::PadMappingArray pad_map = NetPlay::netplay_client->GetPadMapping();
   for (int i = 0; i < 4; i++)
   {
     m_player_pad_map[i] = pad_map[i];
+
+    if (m_player_pad_map[i] == m_local_pid)
+      m_is_spectator = false;
   }
 
   return;
@@ -3115,6 +3122,97 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
     return;
 
   INFO_LOG_FMT(EXPANSIONINTERFACE, "Draining net pad queue...");
+
+  if (m_is_spectator)
+  {
+    INFO_LOG_FMT(EXPANSIONINTERFACE, " spectator mode detected");
+
+    u32 delay_buffer = NetPlay::netplay_client->GetPadBufferSize();
+
+    // for each player
+    for (int i = 0; i < 4; i++)
+    {
+      NetPlay::GameInput input;
+      while (NetPlay::netplay_client->GetPlayerGameInput(i, &input))
+      {
+        // read game state hash
+        m_player_gamestate_frame[i] = input.game_state.frame;
+        m_player_gamestate_hash[i] = input.game_state.hash;
+
+        // get this frame's input data for this player
+        NetPad(*pad_buffer)[4] = (input.is_rollback) ? m_rollback_buffer : m_delay_buffer;
+        NetPad* this_pad = &pad_buffer[(input.frame) % PAD_BUFFER_SIZE][i];
+
+        // copy input data
+        memset(&this_pad->status, 0, sizeof(this_pad->status));
+        this_pad->status = {
+            .button = input.status.button,
+            .stickX = NetPlay_ClampStick(input.status.stickX),
+            .stickY = NetPlay_ClampStick(input.status.stickY),
+            .substickX = NetPlay_ClampStick(input.status.substickX),
+            .substickY = NetPlay_ClampStick(input.status.substickY),
+            .triggerLeft = NetPlay_ClampTrigger(input.status.triggerLeft),
+            .triggerRight = NetPlay_ClampTrigger(input.status.triggerRight),
+            .analogA = input.status.analogA,
+            .analogB = input.status.analogB,
+            .isConnected = input.status.isConnected,
+        };
+
+        this_pad->frame = input.frame;
+
+        INFO_LOG_FMT(
+            EXPANSIONINTERFACE,
+            "  drained {} input: frame {} port {} ({}:{}) 0x{:04X} has state {} with hash 0x{:08x}",
+            input.is_rollback ? "rollback" : "delay", this_pad->frame, i,
+            (s8)this_pad->status.stickX, (s8)this_pad->status.stickY, this_pad->status.button,
+            (u32)this_pad->state, this_pad->hash_real);
+
+        // INFO_LOG_FMT(EXPANSIONINTERFACE,
+        //              "      hash_real: {:08x}   hash_predict: {:08x}", this_pad->hash_real,
+        //              this_pad->hash_predict);
+
+        m_player_drain_num[i] = input.frame + 1;
+
+        // push into spectator queue
+        if (m_player_drain_num[i] - m_spectate_confirm_num[i] >= delay_buffer)
+        {
+          u32 arr_idx = (m_spectate_confirm_num[i]) % PAD_BUFFER_SIZE;
+          NetPad* rollback_pad = &m_rollback_buffer[arr_idx][i];
+          NetPad* delay_pad = &m_delay_buffer[arr_idx][i];
+          this_pad = nullptr;
+
+          // if we have a frame for both modes, use the one with the higher instance idndex
+          if (rollback_pad->frame == delay_pad->frame)
+          {
+            if (rollback_pad->instance_idx > delay_pad->instance_idx)
+              this_pad = rollback_pad;
+            else
+              this_pad = delay_pad;
+          }
+          else
+          {
+            // decide between rollback or delay pad for this frame
+            if (rollback_pad->frame == m_spectate_confirm_num[i])
+              this_pad = rollback_pad;
+            else if (delay_pad->frame == m_spectate_confirm_num[i])
+              this_pad = delay_pad;
+            else
+              ERROR_LOG_FMT(EXPANSIONINTERFACE, "Spectate Mode: no valid input for frame {}",
+                            m_spectate_confirm_num[i]);
+          }
+
+          m_spectate_queue[i].Push(*this_pad);
+          m_spectate_confirm_num[i]++;
+
+        }
+
+      }
+
+    }
+
+    return;
+
+  }
 
   // check each player
   for (int i = 0; i < 4; i++)
