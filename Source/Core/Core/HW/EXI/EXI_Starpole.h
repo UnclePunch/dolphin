@@ -308,6 +308,8 @@ typedef struct
   be_u16 frame_size;
   be_u16 stage_kind;
   char stadium_kind;
+  char stadium_round;
+  u32 stadium_score[4];
   //char city_kind;
   //be_u16 time_seconds;
   //u8 tempo;
