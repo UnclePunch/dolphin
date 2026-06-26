@@ -248,6 +248,11 @@ void GameCubePane::CreateWidgets()
   starpole_layout->addWidget(m_starpole_replay_usernames, starpole_row, 0, 1, -1);
   starpole_row++;
 
+  m_starpole_replay_folders =
+      new ConfigBool(tr("Group Replays in Folders"), Config::MAIN_STARPOLE_REPLAY_FOLDERS);
+  starpole_layout->addWidget(m_starpole_replay_folders, starpole_row, 0, 1, -1);
+  starpole_row++;
+
   m_starpole_replay_rollback =
       new ConfigBool(tr("Display Rollbacks in Replays"), Config::MAIN_STARPOLE_REPLAY_ROLLBACK);
   starpole_layout->addWidget(m_starpole_replay_rollback, starpole_row, 0, 1, -1);

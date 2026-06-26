@@ -193,7 +193,8 @@ typedef enum
   STARPOLE_CMD_MODSAVE,
   STARPOLE_CMD_MATCH,
   STARPOLE_CMD_FRAME,
-  STARPOLE_CMD_END,
+  STARPOLE_CMD_MATCHEND,
+  STARPOLE_CMD_SEQEND,     // sequence is a collection of matches, like in city trial where there can be 2 stadiums after the city
 
   // playback
   STARPOLE_CMD_REQMODSAVE,
@@ -240,6 +241,34 @@ typedef enum
   STARPOLE_KIND_ROLLBACK,
 } StarpoleNetPadKind;
 
+typedef enum GroundKind
+{
+  GRKIND_CITY1 = 9,
+  GRKIND_DRAG1,
+  GRKIND_DRAG2,
+  GRKIND_DRAG3,
+  GRKIND_DRAG4,
+  GRKIND_AIRGLIDER,
+  GRKIND_TARGETFLIGHT,
+  GRKIND_HIGHJUMP,
+  GRKIND_KIRBYMELEE1,
+  GRKIND_KIRBYMELEE2,
+  GRKIND_DESTRUCTIONDERBY1,
+  GRKIND_DESTRUCTIONDERBY2,
+  GRKIND_DESTRUCTIONDERBY3,
+  GRKIND_DESTRUCTIONDERBY4,
+  GRKIND_DESTRUCTIONDERBY5,
+  GRKIND_SINGLERACE1,
+  GRKIND_SINGLERACE2,
+  GRKIND_SINGLERACE3,
+  GRKIND_SINGLERACE4,
+  GRKIND_SINGLERACE5,
+  GRKIND_SINGLERACE6,
+  GRKIND_SINGLERACE7,
+  GRKIND_SINGLERACE8,
+  GRKIND_SINGLERACE9,
+  GRKIND_VSKINGDEDEDE,
+} GroundKind;
 
 // payload structures
 typedef struct
@@ -309,6 +338,7 @@ typedef struct
   be_u16 stage_kind;
   char stadium_kind;
   char stadium_round;
+                          // two more bytes here
   u32 stadium_score[4];
   //char city_kind;
   //be_u16 time_seconds;
@@ -407,6 +437,14 @@ public:
     file.write(reinterpret_cast<const char*>(data), size);
     if (!file)
       throw std::runtime_error("Failed to write chunk to file");
+  }
+
+  std::streampos Tell() { return file.tellp(); }
+  
+  void Seek(std::streampos pos)
+  {
+    file.clear();
+    file.seekp(pos);
   }
 
   // flush to disk
@@ -594,7 +632,9 @@ private:
   void ModSave_Receive(u8* read_ptr, u32 size);
   void Match_Receive(u8* read_ptr, u32 size);
   void Frame_Receive(u8* read_ptr, u32 size);
-  void End_Receive();
+  void MatchEnd_Receive();
+  void SeqEnd_Receive();
+  std::string Replay_GetStageName(GroundKind kind, int stadium_round);
 
   // Playback
   int Match_Prepare();
@@ -621,8 +661,13 @@ private:
   StarpoleCmd cur_cmd = STARPOLE_CMD_NUM;  // current operation being carried out
   u32         cur_args = 0;
 
+  std::string             m_replay_folder_name;
+  bool                    m_replay_seq_end = true;
   StarpoleReplayHeader    m_replay_header;
+  std::unique_ptr<u8[]>   m_mod_save_alloc;
+  u32                     m_mod_save_size;
   StarpoleDataMatch       m_match_data;   
+  StarpoleDataNetplay     m_dolphin_data;
   u32                     m_file_frame_idx;       // the frame in the file we are reading (can diverge from the game frame if rollbacks are included in the replay)
   u32                     m_game_frame_idx;       // the game frame number the current frame corresponds to
   StarpoleReplayState     replay_state;

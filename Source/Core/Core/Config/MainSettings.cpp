@@ -403,8 +403,9 @@ const Info<bool> MAIN_GBA_THREADS{{System::Main, "GBA", "Threads"}, true};
 
 // Main.Starpole
 const Info<int> MAIN_STARPOLE_NET_DELAY{{System::Main, "Starpole", "NetDelay"}, 2};
-const Info<bool> MAIN_STARPOLE_REPLAY_ROLLBACK{{System::Main, "Starpole", "ReplayRollback"}, false};
 const Info<bool> MAIN_STARPOLE_REPLAY_USERNAMES{{System::Main, "Starpole", "ReplayUsernames"}, true};
+const Info<bool> MAIN_STARPOLE_REPLAY_FOLDERS{{System::Main, "Starpole", "ReplayFolders"}, true};
+const Info<bool> MAIN_STARPOLE_REPLAY_ROLLBACK{{System::Main, "Starpole", "ReplayRollback"}, false};
 
 // Main.Network
 

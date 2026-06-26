@@ -89,5 +89,6 @@ private:
 
   ConfigInteger* m_starpole_delay_frames;
   ConfigBool* m_starpole_replay_usernames;
+  ConfigBool* m_starpole_replay_folders;
   ConfigBool* m_starpole_replay_rollback;
 };

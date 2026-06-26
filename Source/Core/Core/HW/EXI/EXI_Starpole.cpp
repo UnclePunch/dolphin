@@ -52,10 +52,6 @@ void CEXIStarpole::DoState(PointerWrap& p)
   p.Do(cur_cmd);
   p.Do(cur_args);
 
-  p.Do(m_file_frame_idx);
-  p.Do(m_game_frame_idx);
-  p.Do(replay_state);
-
   p.Do(m_is_rollback_active);
   p.Do(m_req_load);
   p.Do(m_savestate_size);
@@ -81,9 +77,10 @@ void CEXIStarpole::DoState(PointerWrap& p)
   p.Do(replay_state);
   p.Do(is_active);
   p.Do(replay_file_path);
+
+  size_t tell;
   if (replay_state == STARPOLE_REPLAYSTATE_PLAYBACK)
   {
-    size_t tell;
     if (p.IsWriteMode())
     {
       // backup tell
@@ -95,8 +92,30 @@ void CEXIStarpole::DoState(PointerWrap& p)
       // restore tell
       OpenFile(replay_file_path);
       p.Do(tell);
-      reader->Tell() = tell;
+      reader->Seek(tell);
     }
+  }
+  else if (replay_state == STARPOLE_REPLAYSTATE_RECORD)
+  {
+    if (p.IsReadMode())
+    {
+      replay_state = STARPOLE_REPLAYSTATE_NONE;
+      CloseWriter();
+    }
+
+  //  if (p.IsWriteMode())
+  //  {
+  //    // backup tell
+  //    tell = writer->Tell();
+  //    p.Do(tell);
+  //  }
+  //  else
+  //  {
+  //    // restore tell
+  //    OpenFile(replay_file_path);
+  //    p.Do(tell);
+  //    writer->Seek(tell);
+  //  }
   }
 
   // restore savestates
@@ -156,8 +175,14 @@ u32 CEXIStarpole::ImmRead(u32 size)
     response = Frame_Prepare(cur_args);
     break;
 
-  case STARPOLE_CMD_END:
-    End_Receive();
+  case STARPOLE_CMD_MATCHEND:
+    MatchEnd_Receive();
+    response = 0;
+    cur_cmd = STARPOLE_CMD_NUM;             // no follow up DMA, null cur_cmd
+    break;
+
+  case STARPOLE_CMD_SEQEND:
+    SeqEnd_Receive();
     response = 0;
     cur_cmd = STARPOLE_CMD_NUM;             // no follow up DMA, null cur_cmd
     break;
@@ -969,15 +994,28 @@ void CEXIStarpole::Replay_Create(u32 modsave_size)
 }
 void CEXIStarpole::ModSave_Receive(u8* read_ptr, u32 size)
 {
-  Replay_Create(size);
-
-  // write mod save data
-  WriteFile(read_ptr, size);
-
+  // this gets sent to us first, save it for writing to file later
+  m_mod_save_alloc = std::make_unique<u8[]>(size);
+  memcpy((void*)m_mod_save_alloc.get(), read_ptr, size);
+  m_mod_save_size = size;
 }
 void CEXIStarpole::Match_Receive(u8 *read_ptr, u32 size)
 {
+  // read match data
   memcpy((void*)&m_match_data, read_ptr, size);
+
+  // create netplay data
+  DolphinData_Create(&m_dolphin_data);
+
+  // create replay file
+  Replay_Create(m_mod_save_size);
+
+  // begin writing data
+  WriteFile(m_mod_save_alloc.get(), m_mod_save_size);             // write mod save data
+  WriteFile((uint8_t*)&m_match_data, size);                       // write match data
+  WriteFile((uint8_t*)&m_dolphin_data, sizeof(m_dolphin_data));   // write dolphin data
+
+  replay_state = STARPOLE_REPLAYSTATE_RECORD;
 
   //int active_ply_num = 0;
   //for (int i = 0; i < 4; i++)
@@ -990,18 +1028,12 @@ void CEXIStarpole::Match_Receive(u8 *read_ptr, u32 size)
   //             active_ply_num, m_match_data.stage_kind.ToHost(), m_match_data.stadium_kind,
   //             m_match_data.rng_seed.ToHost());
 
-  WriteFile((uint8_t*)&m_match_data, size);
-  replay_state = STARPOLE_REPLAYSTATE_RECORD;
-
-  // add netplay data
-  StarpoleDataNetplay netplay;
-  DolphinData_Create(&netplay);
-
-  WriteFile((uint8_t*)&netplay, sizeof(netplay));
-  
 }
 void CEXIStarpole::Frame_Receive(u8* read_ptr, u32 size)
 {
+  if (replay_state != STARPOLE_REPLAYSTATE_RECORD)
+    return;
+
   StarpoleDataFrame frame;
 
   memcpy((void*)&frame, read_ptr, size);
@@ -1033,8 +1065,11 @@ void CEXIStarpole::Frame_Receive(u8* read_ptr, u32 size)
   */
 
 }
-void CEXIStarpole::End_Receive()
+void CEXIStarpole::MatchEnd_Receive()
 {
+  if (replay_state != STARPOLE_REPLAYSTATE_RECORD)
+    return;
+
   int terminator = -1;
   WriteFile((uint8_t*)&terminator, sizeof(terminator));
 
@@ -1044,6 +1079,75 @@ void CEXIStarpole::End_Receive()
   replay_state = STARPOLE_REPLAYSTATE_NONE;
 
   INFO_LOG_FMT(EXPANSIONINTERFACE, "Match end.");
+}
+void CEXIStarpole::SeqEnd_Receive()
+{
+  m_replay_seq_end = true;
+
+  // zip up the folder?
+
+  INFO_LOG_FMT(EXPANSIONINTERFACE, "Sequence end.");
+}
+
+
+std::string CEXIStarpole::Replay_GetStageName(GroundKind kind, int stadium_round)
+{
+  std::string stage_name;
+
+  switch (kind)
+  {
+  case (GRKIND_CITY1):
+    stage_name = "City";
+    break;
+  case (GRKIND_DRAG1):
+  case (GRKIND_DRAG2):
+  case (GRKIND_DRAG3):
+  case (GRKIND_DRAG4):
+    stage_name = "Drag" + std::format("{}", (kind - GRKIND_DRAG1) + 1);
+    break;
+  case (GRKIND_AIRGLIDER):
+    stage_name = "Glider";
+    break;
+  case (GRKIND_TARGETFLIGHT):
+    stage_name = "Target";
+    break;
+  case (GRKIND_HIGHJUMP):
+    stage_name = "Jump";
+    break;
+  case (GRKIND_KIRBYMELEE1):
+  case (GRKIND_KIRBYMELEE2):
+    stage_name = "Melee" + std::format("{}", (kind - GRKIND_KIRBYMELEE1) + 1);
+    break;
+  case (GRKIND_DESTRUCTIONDERBY1):
+  case (GRKIND_DESTRUCTIONDERBY2):
+  case (GRKIND_DESTRUCTIONDERBY3):
+  case (GRKIND_DESTRUCTIONDERBY4):
+  case (GRKIND_DESTRUCTIONDERBY5):
+    stage_name = "Derby" + std::format("{}", (kind - GRKIND_DESTRUCTIONDERBY1) + 1);
+    break;
+  case (GRKIND_SINGLERACE1):
+  case (GRKIND_SINGLERACE2):
+  case (GRKIND_SINGLERACE3):
+  case (GRKIND_SINGLERACE4):
+  case (GRKIND_SINGLERACE5):
+  case (GRKIND_SINGLERACE6):
+  case (GRKIND_SINGLERACE7):
+  case (GRKIND_SINGLERACE8):
+  case (GRKIND_SINGLERACE9):
+    stage_name = "Race" + std::format("{}", (kind - GRKIND_SINGLERACE1) + 1);
+    break;
+  case (GRKIND_VSKINGDEDEDE):
+    stage_name = "VSKing";
+    break;
+  default:
+    stage_name = "Stage" + std::format("{}", (int)kind);
+    break;
+  }
+
+  if (stadium_round > 0)
+    stage_name += std::format("{}", (int)stadium_round + 1);
+
+  return stage_name;
 }
 
 // Playback
@@ -1345,18 +1449,61 @@ std::string CEXIStarpole::GenerateReplayFilename()
   std::tm tm{};
   localtime_s(&tm, &t);  // must use localtime_r on POSIX
 
+  // folder name = 20260626_135549_Uncl_Poyo_Taco
+  // rp_20260626_135549_airride
+  // rp_20260626_135549_city
+  // rp_20260626_135549_target
+  // rp_20260626_135549_target2
+  // rp_20260626_135549_race
+  // rp_20260626_135549_derby
+  // rp_20260626_135549_glider
+  // rp_20260626_135549_glider2
+
+  // check to generate a new folder name
+  if (m_replay_seq_end)
+  {
+    m_replay_seq_end = false;
+    m_replay_folder_name.clear();
+
+    // generate folder name if tickbox is enabled and if this is a city trial match
+    if (Config::Get(Config::MAIN_STARPOLE_REPLAY_FOLDERS) &&
+        m_match_data.stage_kind.ToHost() == (int)GRKIND_CITY1)
+    {
+      std::ostringstream oss;
+      oss << std::put_time(&tm, "%Y%m%d_%H%M%S");
+
+      if (m_dolphin_data.is_netplay.ToHost())
+      {
+        // build new
+        for (int i = 0; i < 4; i++)
+        {
+          // player is a human
+          if (m_match_data.ply_desc[i].p_kind == 0)
+          {
+            oss << "_";
+            oss.write(m_dolphin_data.usernames[i], 4);
+          }
+        }
+      }
+
+      oss << "/";
+      m_replay_folder_name = oss.str();
+
+      // ensure folder exists
+      CreateDirectoryA((File::GetUserPath(D_KAR_REPLAY_IDX) + m_replay_folder_name).c_str(),
+                       nullptr);
+    }
+  }
+
+  // get stage info
+  std::string stage_name = Replay_GetStageName((GroundKind)m_match_data.stage_kind.ToHost(), m_match_data.stadium_round);
+
   // generate unique filename based on current time and date
   std::ostringstream filename;
-  filename << "replay_"
-     << std::put_time(&tm, "%Y%m%d_%H%M%S")
-     << ".krf";
+  filename << std::put_time(&tm, "%Y%m%d_%H%M%S_") << stage_name << ".krf";
+  // filename << stage_name << ".krf";
 
-  // // remember last created replay
-  // std::ofstream out(recent_file_path);
-  // out << filename.str() << '\n';
-  // out.close();
-
-  return File::GetUserPath(D_KAR_REPLAY_IDX) + filename.str();
+  return File::GetUserPath(D_KAR_REPLAY_IDX) + m_replay_folder_name + filename.str();
 }
 
 int CEXIStarpole::GetLocalNetplayIndex()
