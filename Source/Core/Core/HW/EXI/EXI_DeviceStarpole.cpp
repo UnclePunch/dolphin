@@ -1,7 +1,7 @@
 // Copyright 2017 Dolphin Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "Core/HW/EXI/EXI_Starpole.h"
+#include "Core/HW/EXI/EXI_DeviceStarpole.h"
 
 #include "Core/HW/EXI/EXI.h"
 #include "Core/HW/EXI/EXI_Device.h"
@@ -190,27 +190,19 @@ u32 CEXIStarpole::ImmRead(u32 size)
   case STARPOLE_CMD_CHECKPLAYBACK:
     if (is_playback_queued)
     {
-      try
-      {
-        // open file
-        OpenFile(replay_file_path);
+      // open file
+      OpenFile(replay_file_path);
 
-        // read in header
-        ReadFileOffset((uint8_t*)&m_replay_header, 0, sizeof(StarpoleReplayHeader));
+      // read in header
+      ReadFileOffset((uint8_t*)&m_replay_header, 0, sizeof(StarpoleReplayHeader));
 
-        response = 1;
-      }
-      catch (const std::exception& e)
-      {
-        ERROR_LOG_FMT(EXPANSIONINTERFACE, "{}", e.what());
-
-        response = 0;
-      }
+      response = 1;
 
       is_playback_queued = 0;
     }
     else
       response = 0;
+      
     break;
 
   case STARPOLE_CMD_DOLPHIN:
@@ -1444,10 +1436,14 @@ std::string CEXIStarpole::GenerateReplayFilename()
 {
   using namespace std::chrono;
 
-  auto now = system_clock::now();
-  std::time_t t = system_clock::to_time_t(now);
+  std::time_t t = std::time(nullptr);
   std::tm tm{};
-  localtime_s(&tm, &t);  // must use localtime_r on POSIX
+
+  #ifdef _WIN32
+  localtime_s(&tm, &t);
+  #else
+  localtime_r(&t, &tm);
+  #endif
 
   // folder name = 20260626_135549_Uncl_Poyo_Taco
   // rp_20260626_135549_airride
@@ -1490,8 +1486,7 @@ std::string CEXIStarpole::GenerateReplayFilename()
       m_replay_folder_name = oss.str();
 
       // ensure folder exists
-      CreateDirectoryA((File::GetUserPath(D_KAR_REPLAY_IDX) + m_replay_folder_name).c_str(),
-                       nullptr);
+      File::CreateDir(File::GetUserPath(D_KAR_REPLAY_IDX) + m_replay_folder_name.c_str());
     }
   }
 
@@ -1716,8 +1711,8 @@ void CEXIStarpole::SaveState_Init(DolDataSection* read_ptr, u32 section_num)
   std::vector<DolDataSection> sections(section_num);
   for (size_t i = 0; i < section_num; i++)
   {
-    sections[i].address = std::byteswap(read_ptr[i].address);
-    sections[i].size    = std::byteswap(read_ptr[i].size);
+    sections[i].address = __builtin_bswap32(read_ptr[i].address);
+    sections[i].size    = __builtin_bswap32(read_ptr[i].size);
   }
 
   // determine chunk info

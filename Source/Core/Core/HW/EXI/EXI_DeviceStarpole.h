@@ -426,7 +426,7 @@ public:
   StreamWriter(const std::string& filename) : file(filename, std::ios::binary)
   {
     if (!file)
-      throw std::runtime_error("Failed to open file for streaming write");
+      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to open file");
   }
 
   ~StreamWriter() { file.close(); }
@@ -435,8 +435,9 @@ public:
   void WriteChunk(const uint8_t* data, size_t size)
   {
     file.write(reinterpret_cast<const char*>(data), size);
+    
     if (!file)
-      throw std::runtime_error("Failed to write chunk to file");
+      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to write chunk to file");
   }
 
   std::streampos Tell() { return file.tellp(); }
@@ -459,7 +460,7 @@ public:
   StreamReader(const std::string& filename) : file(filename, std::ios::binary)
   {
     if (!file)
-      throw std::runtime_error("Failed to open file for reading");
+      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to open file for reading");
   }
 
   // Read the entire file into a vector
@@ -470,11 +471,11 @@ public:
     file.seekg(0, std::ios::beg);
 
     if (size < 0)
-      throw std::runtime_error("Failed to determine file size");
+      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to determine file size");
 
     std::vector<uint8_t> buffer(size);
     if (!file.read(reinterpret_cast<char*>(buffer.data()), size))
-      throw std::runtime_error("Failed to read file");
+      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to read file");
 
     return buffer;
   }
@@ -482,17 +483,17 @@ public:
   void ReadChunk(uint8_t* buffer, size_t size)
   {
     if (!file.read(reinterpret_cast<char*>(buffer), size))
-      throw std::runtime_error("Failed to read chunk");
+      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to read chunk");
   }
 
   void ReadChunkOffset(uint8_t* buffer, std::streampos offset, size_t size)
   {
     file.seekg(offset);
     if (!file)
-      throw std::runtime_error("Failed to seek to offset");
+      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to seek to offset");
 
     if (!file.read(reinterpret_cast<char*>(buffer), size))
-      throw std::runtime_error("Failed to read bytes");
+      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to read bytes");
   }
 
   std::streamsize GetFileSize()

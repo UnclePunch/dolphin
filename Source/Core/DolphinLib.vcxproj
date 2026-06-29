@@ -87,7 +87,7 @@
     <ClCompile Include="Core\HW\EXI\EXI_Starpole.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Core\HW\EXI\EXI_Starpole.h" />
+    <ClInclude Include="Core\HW\EXI\EXI_DeviceStarpole.h" />
   </ItemGroup>
   <UsingTask TaskName="GetProductVersion" TaskFactory="CodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
     <ParameterGroup>

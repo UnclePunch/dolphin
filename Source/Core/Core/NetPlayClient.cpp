@@ -46,7 +46,7 @@
 #include "Core/GeckoCode.h"
 #include "Core/HW/EXI/EXI.h"
 #include "Core/HW/EXI/EXI_DeviceIPL.h"
-#include "Core/HW/EXI/EXI_Starpole.h"
+#include "Core/HW/EXI/EXI_DeviceStarpole.h"
 #ifdef HAS_LIBMGBA
 #include "Core/HW/GBACore.h"
 #endif

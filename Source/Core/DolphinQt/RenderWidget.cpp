@@ -24,7 +24,7 @@
 #include "Core/State.h"
 #include "Core/System.h"
 
-#include "Core/HW/EXI/EXI_Starpole.h"
+#include "Core/HW/EXI/EXI_DeviceStarpole.h"
 
 #include "DolphinQt/Host.h"
 #include "DolphinQt/QtUtils/ModalMessageBox.h"
