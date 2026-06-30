@@ -136,7 +136,7 @@ void RenderWidget::dropEvent(QDropEvent* event)
   const QString extension = file_info.suffix().toLower();
 
   // handle Starpole replay files
-  if (extension == tr("krf"))
+  if (extension == QStringLiteral("krf"))
   {
     auto& system = Core::System::GetInstance();
 
