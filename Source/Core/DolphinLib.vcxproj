@@ -84,7 +84,7 @@
     <Text Include="$(BuildInfoTemplate)" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Core\HW\EXI\EXI_Starpole.cpp" />
+    <ClCompile Include="Core\HW\EXI\EXI_DeviceStarpole.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Core\HW\EXI\EXI_DeviceStarpole.h" />
