@@ -144,6 +144,7 @@ void CEXIStarpole::ImmWrite(u32 data, u32 size)
 u32 CEXIStarpole::ImmRead(u32 size)
 {
   int response = 0;
+  auto start = std::chrono::high_resolution_clock::now();
 
   // respond with the appropriate data
   switch (cur_cmd)
@@ -284,7 +285,10 @@ u32 CEXIStarpole::ImmRead(u32 size)
     response = -1;
   }
 
-  // INFO_LOG_FMT(EXPANSIONINTERFACE, "EXI STARPOLE Imm Response {:08x}", response);
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  //WARN_LOG_FMT(EXPANSIONINTERFACE, "Imm Read {} in {:.2f} ms", (int)cur_cmd,
+  //             duration.count() / 1000.0);
 
   return response;
 }
@@ -297,6 +301,8 @@ void CEXIStarpole::DMAWrite(u32 address, u32 size)
 
   // get pointer to address we will read from
   u8* read_ptr = m_system.GetMemory().GetPointerForRange(address, size);
+
+  auto start = std::chrono::high_resolution_clock::now();
 
   // receive the data
   switch (cur_cmd)
@@ -325,6 +331,10 @@ void CEXIStarpole::DMAWrite(u32 address, u32 size)
     break;
   }
 
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  //WARN_LOG_FMT(EXPANSIONINTERFACE, "DMA Write {} in {:.2f} ms", (int)cur_cmd, duration.count() / 1000.0);
+
   cur_cmd = STARPOLE_CMD_NUM;  // data has been written to memory, end the current command operation
 }
 
@@ -335,6 +345,8 @@ void CEXIStarpole::DMARead(u32 address, u32 size)
 
   // get pointer to address we will write to
   u8* write_ptr = m_system.GetMemory().GetPointerForRange(address, size);
+
+  auto start = std::chrono::high_resolution_clock::now();
 
   // perform the current command's operation
   switch (cur_cmd)
@@ -366,6 +378,11 @@ void CEXIStarpole::DMARead(u32 address, u32 size)
     ERROR_LOG_FMT(EXPANSIONINTERFACE, "DMA Reponse not handled!");
     break;
   }
+
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+  //WARN_LOG_FMT(EXPANSIONINTERFACE, "DMA Read {} in {:.2f} ms", (int)cur_cmd,
+  //             duration.count() / 1000.0);
 
   cur_cmd = STARPOLE_CMD_NUM;   // data has been written to memory, end the current command operation
 }
@@ -1034,27 +1051,6 @@ void CEXIStarpole::Frame_Receive(u8* read_ptr, u32 size)
 
   INFO_LOG_FMT(EXPANSIONINTERFACE, "Replay: wrote game frame {}",
                frame.frame_idx.ToHost());
-
-  /*
-  const u32 ply_count = std::min<u32>(frame.ply_num, 4);
-
-  // Per-player data
-  for (u32 i = 0; i < ply_count; i++)
-  {
-     const auto& ply = frame.ply[i];
-
-    INFO_LOG_FMT(EXPANSIONINTERFACE, "Ply {}", ply.idx);
-
-    INFO_LOG_FMT(EXPANSIONINTERFACE,
-                 "  Inputs: LStick({}, {}) RStick({}, {}) Buttons: {:08x}",
-                 ply.input.stickX, ply.input.stickY,
-                 ply.input.substickX, ply.input.substickY,
-                 (int)ply.input.down << 4);
-
-    INFO_LOG_FMT(EXPANSIONINTERFACE, "");
-
-  }
-  */
 
 }
 void CEXIStarpole::MatchEnd_Receive()
