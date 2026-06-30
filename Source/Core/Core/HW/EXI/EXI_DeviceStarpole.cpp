@@ -1711,8 +1711,8 @@ void CEXIStarpole::SaveState_Init(DolDataSection* read_ptr, u32 section_num)
   std::vector<DolDataSection> sections(section_num);
   for (size_t i = 0; i < section_num; i++)
   {
-    sections[i].address = __builtin_bswap32(read_ptr[i].address);
-    sections[i].size    = __builtin_bswap32(read_ptr[i].size);
+    sections[i].address = Common::swap32(read_ptr[i].address);
+    sections[i].size = Common::swap32(read_ptr[i].size);
   }
 
   // determine chunk info
