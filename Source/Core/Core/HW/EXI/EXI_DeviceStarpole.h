@@ -562,6 +562,8 @@ public:
   void NetPlay_InitData();
   void NetPlay_DrainPadQueue();
   u32 NetPlay_GetGameRNG();
+  s32 NetPlay_GetTimeOffset();
+  void NetPlay_ClearTimeOffsets();
 
   bool CheckActive();
 
@@ -615,6 +617,7 @@ private:
   void Netsync_ReceiveInputs(u8* read_ptr, u32 size);
   void Netsync_ReceiveGameState(u8* read_ptr, u32 size);
   void Netsync_SendInputs(u8* write_ptr);
+  void Netsync_UpdateTimeSync();
   void Netsync_Init(bool is_rollback_active, u32 input_delay);
   int Netsync_GetConfirmedInputNum();
   u32 Netsync_ValidatePrediction(int ply);

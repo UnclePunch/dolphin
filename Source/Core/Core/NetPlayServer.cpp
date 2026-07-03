@@ -1308,6 +1308,44 @@ unsigned int NetPlayServer::OnData(sf::Packet& packet, Client& player)
   }
   break;
 
+  case MessageID::GameAck:
+  {
+    // if this is pad data from the last game still being received, ignore it
+    if (player.current_game != m_current_game)
+      break;
+
+    PadIndex map = 0;
+
+    // create outgoing packet
+    sf::Packet spac;
+    spac << MessageID::GameAck;
+
+    while (!packet.endOfPacket())
+    {
+      packet >> map;      // input origin
+
+      u32 frame;
+      packet >> frame;    // frame we are acking
+
+      // outgoing packet needs to inlude:
+      //  player who is acknowledging this input
+      //  frame they are acknowledging.
+
+      // place in outgoing packet
+      spac << player.pid;     // person who sent the server the ack request, forward their identity to the person who sent them their input so they know who acked it
+      spac << frame;
+    }
+
+    //INFO_LOG_FMT(EXPANSIONINTERFACE, "NET SERVER: received ack from player {}. sending to player {} ({})",
+    //             player.pid, m_pad_map.at(map), map);
+
+    // i need to include who sent the ack because clients dont know where the packet came from
+    // unless its explicitly included
+    SendToClient(spac, m_pad_map.at(map));
+
+  }
+  break;
+
   case MessageID::GameRNG:
   {
 
@@ -2289,6 +2327,15 @@ void NetPlayServer::SendToClients(const sf::Packet& packet, const PlayerId skip_
     {
       Send(p.socket, packet, channel_id);
     }
+  }
+}
+void NetPlayServer::SendToClient(const sf::Packet& packet, const PlayerId dest_pid,
+                                  const u8 channel_id)
+{
+  for (auto& p : std::views::values(m_players))
+  {
+    if (p.pid && p.pid == dest_pid)
+      Send(p.socket, packet, channel_id);
   }
 }
 

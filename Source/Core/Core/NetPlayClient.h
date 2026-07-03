@@ -185,11 +185,20 @@ public:
 
   static SyncIdentifier GetSDCardIdentifier();
 
+  s32 CalcTimeOffsetUs();
+  void ClearTimeOffsets();
+
 protected:
   struct AsyncQueueEntry
   {
     sf::Packet packet;
     u8 channel_id = 0;
+  };
+
+  struct AckLog
+  {
+    s32 frame;
+    s64 time;
   };
 
   void ClearBuffers();
@@ -328,6 +337,7 @@ private:
   void OnGameDigestError(sf::Packet& packet);
   void OnGameDigestAbort();
   void OnGameInput(sf::Packet& packet);
+  void OnGameAck(sf::Packet& packet);
   void OnGameRNG(sf::Packet& packet);
 
   bool m_is_connected = false;
@@ -359,6 +369,18 @@ private:
   u64 m_initial_rtc = 0;
   u32 m_initial_rng = 0;
   u32 m_timebase_frame = 0;
+
+  // credit to Fizzi36 for his work on Slippi. this time sync logic is heavily lifted from it!
+  #define TIME_SYNC_INTERVAL (30)
+  u32 m_last_frame_acked[4] = {0};
+  AckLog m_last_ack[4] = {0};
+  s64 m_ping_times[4] = {0};
+  Common::SPSCQueue<AckLog> m_ack_log[4];
+  struct
+  {
+    int head;
+    std::vector<s32> offsets;
+  } m_time_offsets[4];
 
   std::unique_ptr<IOS::HLE::FS::FileSystem> m_wii_sync_fs;
   std::vector<u64> m_wii_sync_titles;

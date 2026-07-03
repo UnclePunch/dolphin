@@ -370,7 +370,10 @@ void CEXIStarpole::DMARead(u32 address, u32 size)
     Netsync_SendInputs(write_ptr);
 
     if (m_is_sim_forward)
+    {
+      Netsync_UpdateTimeSync();
       m_forward_frame++;
+    }
 
     break;
 
@@ -571,6 +574,51 @@ void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
   }
 }
 
+void CEXIStarpole::Netsync_UpdateTimeSync()
+{
+  if (!NetPlay::IsNetPlayRunning())
+    return;
+
+  // handle time sync
+  if (m_forward_frame % TIME_SYNC_INTERVAL == 0)
+  {
+    auto offset = NetPlay_GetTimeOffset();
+
+    // Dynamically adjust emulation speed in order to fine-tune time sync to reduce one sided
+    // rollbacks even more Modify emulation speed up to a max of 1% at 3 frames offset or more.
+    // Don't slow down the front instance as much because we want to prioritize performance for the
+    // fast PC
+    float deviation = 0;
+    float maxSlowDownAmount = 0.005f;
+    float maxSpeedUpAmount = 0.01f;
+    int slowDownFrameWindow = 3;
+    int speedUpFrameWindow = 3;
+    if (offset > -250 && offset < 8000)
+    {
+      // Do nothing, leave deviation at 0 for 100% emulation speed when ahead by 8 ms or less
+    }
+    else if (offset < 0)
+    {
+      // Here we are behind, so let's speed up our instance
+      float frameWindowMultiplier = std::min(-offset / (speedUpFrameWindow * 16683.0f), 1.0f);
+      deviation = frameWindowMultiplier * maxSpeedUpAmount;
+    }
+    else
+    {
+      // Here we are ahead, so let's slow down our instance
+      float frameWindowMultiplier = std::min(offset / (slowDownFrameWindow * 16683.0f), 1.0f);
+      deviation = frameWindowMultiplier * -maxSlowDownAmount;
+    }
+
+    auto dynamicEmulationSpeed = 1.0f + deviation;
+    Config::SetCurrent(Config::MAIN_EMULATION_SPEED, dynamicEmulationSpeed);
+    // SConfig::GetInstance().m_EmulationSpeed = 0.97f; // used for testing
+
+    WARN_LOG_FMT(EXPANSIONINTERFACE, "[Frame {}] Offset for advance is: {} us. New speed: {}%",
+                 m_forward_frame, offset, dynamicEmulationSpeed * 100.0f);
+  }
+}
+
 void CEXIStarpole::Netsync_Init(bool is_rollback_active, u32 input_delay)
 {
   INFO_LOG_FMT(EXPANSIONINTERFACE, "setting rollback to {}", is_rollback_active);
@@ -590,6 +638,8 @@ void CEXIStarpole::Netsync_Init(bool is_rollback_active, u32 input_delay)
     m_player_drain_num[i] = m_forward_frame;
     m_player_confirm_num[i] = m_forward_frame;
   }
+
+  NetPlay_ClearTimeOffsets();
 
   //for (int i = 0; i < 4; i++)
   //  m_player_confirm_num[i] = m_player_drain_num[i];
@@ -783,6 +833,12 @@ bool CEXIStarpole::Netsync_CheckSimForward()
     INFO_LOG_FMT(EXPANSIONINTERFACE, "Netsync_CheckSimForward:");
     INFO_LOG_FMT(EXPANSIONINTERFACE, " determining sim_frames for forward_frame {}",
                  m_forward_frame);
+
+    //if (NetPlay::IsNetPlayRunning() && m_inputs_sent - m_input_delay <= m_forward_frame)
+    //{
+    //  INFO_LOG_FMT(EXPANSIONINTERFACE, " stalling to create time offset due to input delay");
+    //  return false;
+    //}
 
     u32 is_sim_forward = false;
     bool is_in_prediction = ((m_forward_frame - m_confirm_frame) > 1);
@@ -1051,7 +1107,6 @@ void CEXIStarpole::Frame_Receive(u8* read_ptr, u32 size)
 
   INFO_LOG_FMT(EXPANSIONINTERFACE, "Replay: wrote game frame {}",
                frame.frame_idx.ToHost());
-
 }
 void CEXIStarpole::MatchEnd_Receive()
 {

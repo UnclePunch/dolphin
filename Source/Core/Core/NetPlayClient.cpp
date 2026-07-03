@@ -484,6 +484,10 @@ void NetPlayClient::OnData(sf::Packet& packet)
     OnGameInput(packet);
     break;
 
+  case MessageID::GameAck:
+    OnGameAck(packet);
+    break;
+
   case MessageID::GameRNG:
     OnGameRNG(packet);
     break;
@@ -1539,6 +1543,13 @@ void NetPlayClient::OnGameInput(sf::Packet& packet)
 {
   std::lock_guard lk(NetPlay::crit_netplay_client);
 
+  // get current time
+  u64 time = Common::Timer::NowUs();
+
+  // ack packet
+  sf::Packet spac;
+  spac << MessageID::GameAck;
+
   while (!packet.endOfPacket())
   {
     PadIndex map;
@@ -1561,11 +1572,83 @@ void NetPlayClient::OnGameInput(sf::Packet& packet)
     m_game_buffer.at(map).Push(input);
     m_gc_pad_event.Set();
 
+    auto timing = m_last_ack[map];
+    if (m_last_frame_acked[map] == -1)
+    {
+      // Handle case where opponent starts sending inputs before our game has reached frame 1. This
+      // will continuously say frame 0 is now to prevent opp from getting too far ahead
+      timing.frame = input.frame;
+      timing.time = time;
+    }
+
+    s64 opponentSendTimeUs = static_cast<s64>(time) - ((m_ping_times[map]) / 2);
+    s64 frameDiffOffsetUs = 16683LL * ((s32)timing.frame - (s32)input.frame);
+    s64 timeOffsetUs = opponentSendTimeUs - (timing.time) + frameDiffOffsetUs;
+
+    // log the time offset
+    if (m_time_offsets[map].offsets.size() < TIME_SYNC_INTERVAL)
+      m_time_offsets[map].offsets.push_back(std::move(timeOffsetUs));
+    else
+      m_time_offsets[map].offsets[m_time_offsets[map].head % TIME_SYNC_INTERVAL] = timeOffsetUs;
+    m_time_offsets[map].head = (m_time_offsets[map].head + 1) % TIME_SYNC_INTERVAL;
+
+    // WARN_LOG_FMT(EXPANSIONINTERFACE, "NET THREAD: player {} is {} ms from us", map, timeOffsetUs / 1000);
+
+    // send pad ack
+    spac << map;                                          // input origin
+    spac << input.frame;                                  // input frame we are acking
+
     INFO_LOG_FMT(EXPANSIONINTERFACE, "NET THREAD: received frame {} {} inputs for player {} ({}, {}) 0x{:04X} with frame {} game state {:08X}",
         input.frame, (input.is_rollback) ? "rollback" : "delay", map,
                  (s8)input.status.stickX, (s8)input.status.stickY, input.status.button,
                  input.game_state.frame, input.game_state.hash);
   }
+
+  // send acks
+  SendAsync(std::move(spac));
+
+}
+
+void NetPlayClient::OnGameAck(sf::Packet& packet)
+{
+  std::lock_guard lk(NetPlay::crit_netplay_client);
+
+  while (!packet.endOfPacket())
+  {
+    PlayerId pid;     // person who is acking our input
+    packet >> pid;
+
+    u32 frame;        // frame they are acking
+    packet >> frame;
+
+    // ack for all local pads belonging to this pid
+    for (int ply = 0; ply < 4; ply++)
+    {
+      auto mapping = GetPadMapping();
+      if (mapping.at(ply) == pid)
+      {
+        // get ping time for last ack
+        m_ping_times[ply] = Common::Timer::NowUs() - m_ack_log[ply].Front().time;
+        m_ack_log[ply].Pop();
+
+        // save the frame index this ping is for
+        m_last_frame_acked[ply] = frame;
+
+        if (frame % 30 == 0)
+        {
+          std::stringstream pingDisplay;
+          pingDisplay << "Ping: ";
+          for (int i = 0; i < 4; i++)
+          {
+            pingDisplay << (m_ping_times[i] / 1000) << " | ";
+          }
+          OSD::AddTypedMessage(OSD::MessageType::NetPlayPing, pingDisplay.str(),
+                               OSD::Duration::NORMAL, OSD::Color::CYAN);
+        }
+      }
+    }
+  }
+
 
 }
 
@@ -2305,6 +2388,23 @@ void NetPlayClient::AddGameInputToPacket(int in_game_pad, const GameInput& input
            << input.status.triggerLeft << input.status.triggerRight << input.status.isConnected;
   }
 
+  // init ack timers for this frame
+  u64 time = Common::Timer::NowUs();
+  for (int ply = 0; ply < 4; ply++)
+  {
+    // skip for local players and non-present players
+    auto map = GetPadMapping()[ply];
+    if (map == GetLocalPlayerId() || map == 0)
+      continue;
+
+    AckLog ack;
+    ack.frame = input.frame;
+    ack.time = time;
+
+    m_last_ack[ply] = ack;
+    m_ack_log[ply].Push(std::move(ack));
+  }
+
   INFO_LOG_FMT(EXPANSIONINTERFACE, "NET THREAD: sending to clients: frame {} port {} ({}:{}) 0x{:04X} with frame {} game state {:08X}",
                 input.frame,
                 in_game_pad,
@@ -2601,6 +2701,92 @@ int NetPlayClient::NumLocalPads() const
 int NetPlayClient::NumLocalWiimotes() const
 {
   return std::ranges::count(m_wiimote_map, m_local_player->pid);
+}
+
+// Credit: Fizzi36
+// return the smallest time offset among all remote players
+s32 NetPlayClient::CalcTimeOffsetUs()
+{
+  std::lock_guard lk(crit_netplay_client);
+
+  // first make sure we have some time offsets
+  bool empty = true;
+  for (int i = 0; i < 4; i++)
+  {
+    // skip for local players and non-present players
+    auto map = GetPadMapping()[i];
+    if (map == GetLocalPlayerId() || map == 0)
+      continue;
+
+    if (!m_time_offsets[i].offsets.empty())
+    {
+      empty = false;
+      break;
+    }
+  }
+  if (empty)
+  {
+    return 0;
+  }
+
+  std::vector<int> offsets;
+  for (int i = 0; i < 4; i++)
+  {
+    // skip for local players and non-present players
+    auto map = GetPadMapping()[i];
+    if (map == GetLocalPlayerId() || map == 0)
+      continue;
+
+    if (m_time_offsets[i].offsets.empty())
+      continue;
+
+    std::vector<s32> buf;
+    std::copy(m_time_offsets[i].offsets.begin(), m_time_offsets[i].offsets.end(),
+              std::back_inserter(buf));
+
+    // TODO: Does this work?
+    std::sort(buf.begin(), buf.end());
+
+    int bufSize = (int)buf.size();
+    int offset = (int)((1.0f / 3.0f) * bufSize);
+    int end = bufSize - offset;
+
+    int sum = 0;
+    for (int j = offset; j < end; j++)
+    {
+      sum += buf[j];
+    }
+
+    int count = end - offset;
+    if (count <= 0)
+    {
+      return 0;  // What do I return here?
+    }
+
+    s32 result = sum / count;
+    offsets.push_back(result);
+  }
+
+  s32 minOffset = offsets.front();
+  for (int j = 1; j < offsets.size(); j++)
+  {
+    if (offsets[j] < minOffset)
+      minOffset = offsets[j];
+  }
+
+  return minOffset;
+}
+
+
+void NetPlayClient::ClearTimeOffsets()
+{
+  for (int i = 0; i < 4; i++)
+  {
+    m_time_offsets[i].head = 0;
+    m_time_offsets[i].offsets.clear();
+
+    m_last_frame_acked[i] = -1;
+  }
 }
 
 static int InGameToLocal(int ingame_pad, const PadMappingArray& pad_map, PlayerId local_player_pid)
@@ -3310,4 +3496,21 @@ u32 ExpansionInterface::CEXIStarpole::NetPlay_GetGameRNG()
     return NetPlay::netplay_client->GetInitialRNG();
 
   return 0;
+}
+
+s32 ExpansionInterface::CEXIStarpole::NetPlay_GetTimeOffset()
+{
+  if (!NetPlay::netplay_client)
+    return 0;
+
+  return NetPlay::netplay_client->CalcTimeOffsetUs();
+
+}
+
+void ExpansionInterface::CEXIStarpole::NetPlay_ClearTimeOffsets()
+{
+  if (!NetPlay::netplay_client)
+    return;
+
+  NetPlay::netplay_client->ClearTimeOffsets();
 }
