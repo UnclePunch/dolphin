@@ -85,6 +85,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Core\HW\EXI\EXI_DeviceStarpole.cpp" />
+    <ClCompile Include="Core\HW\EXI\Starpole\Starpole_Netplay.cpp" />
+    <ClCompile Include="Core\HW\EXI\Starpole\Starpole_Replay.cpp" />
+    <ClCompile Include="Core\HW\EXI\Starpole\Starpole_State.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Core\HW\EXI\EXI_DeviceStarpole.h" />

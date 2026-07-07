@@ -35,24 +35,10 @@ struct be_u32
   explicit be_u32(u32 host_val) { FromHost(host_val); }
 
   // convert stored big endian to host
-  u32 ToHost() const
-  {
-#if defined(_MSC_VER)
-    return _byteswap_ulong(val);
-#else
-    return __builtin_bswap32(val);
-#endif
-  }
+  u32 ToHost() const { return Common::swap32(val); }
 
   // store host value in big endian format
-  void FromHost(u32 host_val)
-  {
-#if defined(_MSC_VER)
-    val = _byteswap_ulong(host_val);
-#else
-    val = __builtin_bswap32(host_val);
-#endif
-  }
+  void FromHost(u32 host_val) { val = Common::swap32(host_val); }
 
   // construct from host value
   static be_u32 FromHostValue(u32 host_val) { return be_u32(host_val); }
@@ -65,23 +51,9 @@ struct be_s32
 
   explicit be_s32(s32 host_val) { FromHost(host_val); }
 
-  s32 ToHost() const
-  {
-#if defined(_MSC_VER)
-    return static_cast<s32>(_byteswap_ulong(static_cast<u32>(val)));
-#else
-    return static_cast<s32>(__builtin_bswap32(static_cast<u32>(val)));
-#endif
-  }
+  s32 ToHost() const { return static_cast<s32>(Common::swap32(static_cast<u32>(val))); }
 
-  void FromHost(s32 host_val)
-  {
-#if defined(_MSC_VER)
-    val = static_cast<s32>(_byteswap_ulong(static_cast<u32>(host_val)));
-#else
-    val = static_cast<s32>(__builtin_bswap32(static_cast<u32>(host_val)));
-#endif
-  }
+  void FromHost(s32 host_val) { val = static_cast<s32>(Common::swap32(static_cast<u32>(host_val))); }
 
   static be_s32 FromHostValue(s32 host_val) { return be_s32(host_val); }
 };
@@ -89,23 +61,9 @@ struct be_u16
 {
   u16 val;  // stored big-endian
 
-  u16 ToHost() const
-  {
-#if defined(_MSC_VER)
-    return _byteswap_ushort(val);
-#else
-    return __builtin_bswap16(val);
-#endif
-  }
+  u16 ToHost() const { return Common::swap16(val); }
 
-  void FromHost(u16 v)
-  {
-#if defined(_MSC_VER)
-    val = _byteswap_ushort(v);
-#else
-    val = __builtin_bswap16(v);
-#endif
-  }
+  void FromHost(u16 v) { val = Common::swap16(v); }
 };
 struct be_float
 {
@@ -113,11 +71,7 @@ struct be_float
 
   float ToHost() const
   {
-#if defined(_MSC_VER)
-    u32 le = _byteswap_ulong(be);
-#else
-    u32 le = __builtin_bswap32(be);
-#endif
+    u32 le = Common::swap32(be);
     float f;
     std::memcpy(&f, &le, sizeof(float));
     return f;
@@ -127,11 +81,7 @@ struct be_float
   {
     u32 le;
     std::memcpy(&le, &f, sizeof(float));
-#if defined(_MSC_VER)
-    be = _byteswap_ulong(le);
-#else
-    be = __builtin_bswap32(le);
-#endif
+    be = Common::swap32(le);
   }
 };
 struct be_vec2
@@ -146,129 +96,89 @@ struct be_vec3
   be_float z;
 };
 
-struct DolDataSection
-{
-  u32 address;
-  u32 size;
-};
-
-struct CpuState
-{
-  u32 gpr[32];
-  PowerPC::PairedSingle fpr[32];
-  u32 pc;
-  u32 npc;
-  PowerPC::ConditionRegister cr;
-  UReg_MSR msr;
-  UReg_FPSCR fpscr;
-  u32 xer_ca;
-  u32 xer_so_ov;
-  u32 xer_stringctrl;
-};
-
-struct SavestateChunk
-{
-  u32 address;
-  u32 size;
-  size_t data_offset;  // exists in savestate
-};
-
-struct SavestateHeader
-{
-  u32 frame_idx;
-  CpuState cpu;
-  size_t chunk_num;
-};
-
 // commands to identify operations
-typedef enum
+enum class StarpoleCmd
 {
   // identify EXI device, returns STARPOLE_DEVICE_ID
-  STARPOLE_CMD_ID,
+  ID,
 
   // test
-  STARPOLE_CMD_TEST,
+  TEST,
 
   // recording
-  STARPOLE_CMD_MODSAVE,
-  STARPOLE_CMD_MATCH,
-  STARPOLE_CMD_FRAME,
-  STARPOLE_CMD_MATCHEND,
-  STARPOLE_CMD_SEQEND,     // sequence is a collection of matches, like in city trial where there can be 2 stadiums after the city
+  MODSAVE,
+  MATCH,
+  FRAME,
+  MATCHEND,
+  SEQEND,     // sequence is a collection of matches, like in city trial where there can be 2 stadiums after the city
 
   // playback
-  STARPOLE_CMD_REQMODSAVE,
-  STARPOLE_CMD_REQMATCH,
-  STARPOLE_CMD_REQFRAME,
+  REQMODSAVE,
+  REQMATCH,
+  REQFRAME,
 
   // playback
-  STARPOLE_CMD_CHECKPLAYBACK,
+  CHECKPLAYBACK,
 
   // dolphin
-  STARPOLE_CMD_DOLPHIN,
+  DOLPHIN,
 
   // netsync
-  STARPOLE_CMD_NETSTART,
-  STARPOLE_CMD_NETSAVE,
-  STARPOLE_CMD_NETPADSEND,
-  STARPOLE_CMD_NETPADRECV,
-  STARPOLE_CMD_NETGETCONFIRM,
-  STARPOLE_CMD_NETGAMESTATE,
-  STARPOLE_CMD_NETEND,
+  NETSTART,
+  NETSAVE,
+  NETPADSEND,
+  NETPADRECV,
+  NETGETCONFIRM,
+  NETGAMESTATE,
+  NETEND,
 
   // end
-  STARPOLE_CMD_NUM,
-} StarpoleCmd;
+  NUM,
+} ;
 
-typedef enum
+enum class StarpoleReplayState
 {
-  STARPOLE_REPLAYSTATE_NONE,
-  STARPOLE_REPLAYSTATE_RECORD,
-  STARPOLE_REPLAYSTATE_PLAYBACK,
-} StarpoleReplayState;
+  NONE,
+  RECORD,
+  PLAYBACK,
+};
 
-typedef enum
+enum class StarpoleNetPadState
 {
-  STARPOLE_NETPAD_NOTRECEIVED,
-  STARPOLE_NETPAD_PREDICTED,
-  STARPOLE_NETPAD_CORRECTED,
-  STARPOLE_NETPAD_VERIFIED,
-} StarpoleNetPadState;
+  NOTRECEIVED,
+  PREDICTED,
+  CORRECTED,
+  VERIFIED,
+};
 
-typedef enum
+enum class GroundKind
 {
-  STARPOLE_KIND_DELAY,
-  STARPOLE_KIND_ROLLBACK,
-} StarpoleNetPadKind;
-
-typedef enum GroundKind
-{
-  GRKIND_CITY1 = 9,
-  GRKIND_DRAG1,
-  GRKIND_DRAG2,
-  GRKIND_DRAG3,
-  GRKIND_DRAG4,
-  GRKIND_AIRGLIDER,
-  GRKIND_TARGETFLIGHT,
-  GRKIND_HIGHJUMP,
-  GRKIND_KIRBYMELEE1,
-  GRKIND_KIRBYMELEE2,
-  GRKIND_DESTRUCTIONDERBY1,
-  GRKIND_DESTRUCTIONDERBY2,
-  GRKIND_DESTRUCTIONDERBY3,
-  GRKIND_DESTRUCTIONDERBY4,
-  GRKIND_DESTRUCTIONDERBY5,
-  GRKIND_SINGLERACE1,
-  GRKIND_SINGLERACE2,
-  GRKIND_SINGLERACE3,
-  GRKIND_SINGLERACE4,
-  GRKIND_SINGLERACE5,
-  GRKIND_SINGLERACE6,
-  GRKIND_SINGLERACE7,
-  GRKIND_SINGLERACE8,
-  GRKIND_SINGLERACE9,
-  GRKIND_VSKINGDEDEDE,
-} GroundKind;
+  CITY1 = 9,
+  DRAG1,
+  DRAG2,
+  DRAG3,
+  DRAG4,
+  AIRGLIDER,
+  TARGETFLIGHT,
+  HIGHJUMP,
+  KIRBYMELEE1,
+  KIRBYMELEE2,
+  DESTRUCTIONDERBY1,
+  DESTRUCTIONDERBY2,
+  DESTRUCTIONDERBY3,
+  DESTRUCTIONDERBY4,
+  DESTRUCTIONDERBY5,
+  SINGLERACE1,
+  SINGLERACE2,
+  SINGLERACE3,
+  SINGLERACE4,
+  SINGLERACE5,
+  SINGLERACE6,
+  SINGLERACE7,
+  SINGLERACE8,
+  SINGLERACE9,
+  VSKINGDEDEDE,
+};
 
 // payload structures
 typedef struct
@@ -423,33 +333,13 @@ struct NetPad
 class StreamWriter
 {
 public:
-  StreamWriter(const std::string& filename) : file(filename, std::ios::binary)
-  {
-    if (!file)
-      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to open file");
-  }
+  StreamWriter(const std::string& filename);
+  ~StreamWriter();
+  void WriteChunk(const uint8_t* data, size_t size);
 
-  ~StreamWriter() { file.close(); }
-
-  // Write a chunk of data
-  void WriteChunk(const uint8_t* data, size_t size)
-  {
-    file.write(reinterpret_cast<const char*>(data), size);
-    
-    if (!file)
-      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to write chunk to file");
-  }
-
-  std::streampos Tell() { return file.tellp(); }
-  
-  void Seek(std::streampos pos)
-  {
-    file.clear();
-    file.seekp(pos);
-  }
-
-  // flush to disk
-  void Flush() { file.flush(); }
+  std::streampos Tell();
+  void Seek(std::streampos pos);
+  void Flush();
 
 private:
   std::ofstream file;
@@ -457,58 +347,13 @@ private:
 class StreamReader
 {
 public:
-  StreamReader(const std::string& filename) : file(filename, std::ios::binary)
-  {
-    if (!file)
-      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to open file for reading");
-  }
-
-  // Read the entire file into a vector
-  std::vector<uint8_t> ReadAll()
-  {
-    file.seekg(0, std::ios::end);
-    std::streamsize size = file.tellg();
-    file.seekg(0, std::ios::beg);
-
-    if (size < 0)
-      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to determine file size");
-
-    std::vector<uint8_t> buffer(size);
-    if (!file.read(reinterpret_cast<char*>(buffer.data()), size))
-      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to read file");
-
-    return buffer;
-  }
-
-  void ReadChunk(uint8_t* buffer, size_t size)
-  {
-    if (!file.read(reinterpret_cast<char*>(buffer), size))
-      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to read chunk");
-  }
-
-  void ReadChunkOffset(uint8_t* buffer, std::streampos offset, size_t size)
-  {
-    file.seekg(offset);
-    if (!file)
-      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to seek to offset");
-
-    if (!file.read(reinterpret_cast<char*>(buffer), size))
-      ERROR_LOG_FMT(EXPANSIONINTERFACE, "Failed to read bytes");
-  }
-
-  std::streamsize GetFileSize()
-  {
-    file.seekg(0, std::ios::end);
-    return file.tellg();
-  }
-
-  void Seek(std::streampos pos)
-  {
-    file.clear();
-    file.seekg(pos);
-  }
-
-  std::streampos Tell() { return file.tellg(); }
+  StreamReader(const std::string& filename);
+  std::vector<uint8_t> ReadAll();
+  void ReadChunk(uint8_t* buffer, size_t size);
+  void ReadChunkOffset(uint8_t* buffer, std::streampos offset, size_t size);
+  std::streamsize GetFileSize();
+  void Seek(std::streampos pos);
+  std::streampos Tell();
 
 private:
   std::ifstream file;
@@ -516,6 +361,76 @@ private:
 
 namespace ExpansionInterface
 {
+namespace Starpole
+{
+enum class SaveKind
+{
+  Partial,  // used for rollback, does not backup audio
+  Full,     // used for playback seeking, includes audio state
+};
+
+struct DolDataSection
+{
+  u32 address;
+  u32 size;
+  int is_audio;
+};
+
+struct CpuState
+{
+  u32 gpr[32];
+  PowerPC::PairedSingle fpr[32];
+  u32 pc;
+  u32 npc;
+  PowerPC::ConditionRegister cr;
+  UReg_MSR msr;
+  UReg_FPSCR fpscr;
+  u32 xer_ca;
+  u32 xer_so_ov;
+  u32 xer_stringctrl;
+};
+
+struct SavestateChunk
+{
+  u32 address;
+  u32 size;
+  size_t data_offset;  // exists in savestate
+};
+
+struct SavestateHeader
+{
+  u32 frame_idx;
+  u32 file_frame;
+  u32 game_frame;
+  CpuState cpu;
+  size_t chunk_num;
+  // followed by array of SavestateChunk
+};
+
+// SaveState
+class Savestate
+{
+public:
+  Savestate(std::vector<Starpole::DolDataSection> sections, u32 section_num, u32 savestate_num,
+            Starpole::SaveKind state_kind, Core::System& system);
+  ~Savestate();
+  bool Save(u32 frame_idx, u32 file_frame = 0, u32 game_frame = 0);
+  bool Load(u32 frame_idx, u32 *file_frame = 0, u32 *game_frame = 0);
+
+private:
+  std::vector<std::pair<u32, u32>> GetChunkSizes(std::vector<DolDataSection> sections,
+                                                 u32 section_num, SaveKind save_kind);
+  Starpole::SavestateHeader* GetFrame(u32 frame_idx);
+
+  size_t m_state_size;  // size of each savestate in the array
+  u32 m_state_num;      // number of savestates in the array
+  std::unique_ptr<u8[]> m_alloc;
+
+protected:
+  Core::System& m_system;
+};
+}  // namespace Starpole
+
 class CEXIStarpole final : public IEXIDevice
 {
 public:
@@ -531,39 +446,9 @@ public:
 
   bool IsPresent() const override;
 
-  void CreateFile(const std::string& path) { writer = std::make_unique<StreamWriter>(path); }
-  void WriteFile(const uint8_t *data, u32 size) { writer->WriteChunk(data, size); }
-  void CloseWriter()
-  {
-    if (writer)
-    {
-      writer->Flush();
-      writer.reset();
-    }
-  }
-
-  void OpenFile(const std::string& path) { reader = std::make_unique<StreamReader>(path); }
-  void ReadFile(uint8_t* buffer, u32 size) { reader->ReadChunk(buffer, size); }
-  void ReadFileOffset(uint8_t* buffer, u32 offset, u32 size) { reader->ReadChunkOffset(buffer, offset, size); }
-  std::streamsize ReadFileSize() { return reader->GetFileSize(); }
-  void CloseReader()
-  {
-    if (reader)
-    {
-      reader.reset();
-    }
-  }
-
   std::string GenerateReplayFilename();
   int GetLocalNetplayIndex();
   void SetReplay(std::string);
-
-  bool NetPlay_SendGameInput(GCPadStatus* status);
-  void NetPlay_InitData();
-  void NetPlay_DrainPadQueue();
-  u32 NetPlay_GetGameRNG();
-  s32 NetPlay_GetTimeOffset();
-  void NetPlay_ClearTimeOffsets();
 
   bool CheckActive();
 
@@ -571,11 +456,9 @@ private:
   // rollback
   static constexpr bool ROLLBACK_ENABLE = true;
   static constexpr size_t MAX_ROLLBACK_NUM = 5;
-  static constexpr size_t MAX_SAVESTATES = MAX_ROLLBACK_NUM;
-  std::unique_ptr<u8[]> m_savestate_alloc;
-  u32 m_savestate_num = 0;
-  u32 m_req_load = 0;
-  size_t m_savestate_size;
+  static constexpr u32 MAX_SAVESTATES = MAX_ROLLBACK_NUM;
+  std::unique_ptr<Starpole::Savestate> m_rollback_savestates;
+  u32 m_req_rollback = 0;
   bool m_is_rollback_active = false;
   static constexpr bool ALWAYS_DELAY = false;
   static constexpr bool FORCE_ROLLBACK = false;
@@ -608,7 +491,21 @@ private:
   u16 m_instance_idx;                             // number of times we switched between delay and rollback. inputs are stamped with this to know whether or not we should discard old inputs after an instance changes
   u32 m_instance_read_start;
 
+  
+  static constexpr u32 PLAYBACK_SAVESTATE_NUM = (7 * 60) / 5;     // take a savestate every 5 seconds
+  std::unique_ptr<Starpole::Savestate> m_playback_savestates;
+
   void TransferByte(u8& byte) override;
+
+  // file stuff
+  void CreateFile(const std::string& path);
+  void WriteFile(const uint8_t* data, u32 size);
+  void CloseWriter();
+  void OpenFile(const std::string& path);
+  void ReadFile(uint8_t* buffer, u32 size);
+  void ReadFileOffset(uint8_t* buffer, u32 offset, u32 size);
+  std::streamsize ReadFileSize();
+  void CloseReader();
 
   // Netplay
   int DolphinData_Prepare();
@@ -624,6 +521,12 @@ private:
   bool Netsync_CheckSimForward();
   u32 Netsync_GetRollbackNum();
   void Netsync_PredictInputs(int ply);
+  bool NetPlay_SendGameInput(GCPadStatus* status);
+  void NetPlay_InitData();
+  void NetPlay_DrainPadQueue();
+  u32 NetPlay_GetGameRNG();
+  s32 NetPlay_GetTimeOffset();
+  void NetPlay_ClearTimeOffsets();
 
   // Input
   u32 NetPlay_HashPadStatus(GCPadStatus* status);
@@ -651,18 +554,13 @@ private:
   bool Playback_CheckSimForward();
   u32 Playback_GetRollbackNum();
 
-  // Rollback
-  void SaveState_GetChunkSizes(std::vector<DolDataSection> sections, u32 section_num,
-                               std::vector<std::pair<u32, u32>>& chunks);
-  void SaveState_Init(DolDataSection* read_ptr, u32 section_num);
+  // State
+  void SaveState_Init(Starpole::DolDataSection* read_ptr, u32 section_num);
   void SaveState_End();
-  SavestateHeader* SaveState_Get(u32 frame_idx);
-  void SaveState(u32 frame_idx);
-  void LoadState(u32 frames_back);
 
   std::string m_name;
 
-  StarpoleCmd cur_cmd = STARPOLE_CMD_NUM;  // current operation being carried out
+  StarpoleCmd cur_cmd = StarpoleCmd::NUM;  // current operation being carried out
   u32         cur_args = 0;
 
   std::string             m_replay_folder_name;
@@ -682,6 +580,11 @@ private:
   std::unique_ptr<StreamReader> reader;
   bool is_playback_queued = 0;
   std::string replay_file_path = "";
+
+  u32 m_savestate_frame_idx;
+  u32 m_file_frame_idx_backup;
+  u32 m_game_frame_idx_backup;
+
 };
 
 ExpansionInterface::CEXIStarpole* Starpole_Get();

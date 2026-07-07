@@ -3433,15 +3433,15 @@ void ExpansionInterface::CEXIStarpole::NetPlay_DrainPadQueue()
 
       if (input.is_rollback &&
           this_pad->frame == input.frame &&              // not an old input
-          this_pad->state == STARPOLE_NETPAD_PREDICTED)  // we predicted it's value
+          this_pad->state == StarpoleNetPadState::PREDICTED)  // we predicted it's value
       {
         // received input for frame we predicted
         // correct it
-        this_pad->state = STARPOLE_NETPAD_CORRECTED;
+        this_pad->state = StarpoleNetPadState::CORRECTED;
         this_pad->status_predict = this_pad->status;
       }
       else
-        this_pad->state = STARPOLE_NETPAD_VERIFIED;
+        this_pad->state = StarpoleNetPadState::VERIFIED;
 
       // copy input data
       memset(&this_pad->status, 0, sizeof(this_pad->status));
