@@ -581,9 +581,7 @@ private:
   bool is_playback_queued = 0;
   std::string replay_file_path = "";
 
-  u32 m_savestate_frame_idx;
-  u32 m_file_frame_idx_backup;
-  u32 m_game_frame_idx_backup;
+  std::optional<u32> m_playback_desired_frame;
 
 };
 

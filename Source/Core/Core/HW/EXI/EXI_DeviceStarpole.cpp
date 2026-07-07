@@ -219,6 +219,9 @@ u32 CEXIStarpole::ImmRead(u32 size)
 
   case StarpoleCmd::NETPADRECV:   // game is requesting inputs
   {
+    int is_render = 1;
+    int is_rollback = 0;
+
     // check for remote inputs, copy them to our pad buffer and update
     NetPlay_DrainPadQueue();
 
@@ -227,13 +230,50 @@ u32 CEXIStarpole::ImmRead(u32 size)
 
     // request a load state
     if (m_rollback_num > 0)
+    {
       m_req_rollback = m_rollback_num;
+      is_rollback = 1;
+    }
 
     // determine how many frames to simulate
     m_sim_frames = m_is_sim_forward ? (m_rollback_num + 1) : (m_rollback_num);
 
+    // placeholder seek code
+    if (replay_state == StarpoleReplayState::PLAYBACK)
+    {
+      #include <windows.h>
+
+      u32 cur_frame = cur_args;
+
+      if (GetAsyncKeyState(VK_RIGHT) & 0x1)
+      {
+        // to-do: improve this, check if i have a savestate i can jump to first
+        m_playback_desired_frame = cur_args + (5 * 60);
+        cur_frame = ((m_playback_desired_frame.value() / 60) / 5) * (5 * 60);
+      }
+      else if (GetAsyncKeyState(VK_LEFT) & 0x1)
+      {
+        m_playback_desired_frame = cur_args - (5 * 60);
+        cur_frame = ((m_playback_desired_frame.value() / 60) / 5) * (5 * 60);
+      }
+
+      if (m_playback_desired_frame.has_value() &&
+        cur_frame < m_playback_desired_frame.value())
+      {
+        m_sim_frames = m_playback_desired_frame.value() - cur_frame;
+        if (m_sim_frames > MAX_ROLLBACK_NUM + 1)
+        {
+          is_render = 0;
+          m_sim_frames = MAX_ROLLBACK_NUM + 1;
+        }
+        else
+          m_playback_desired_frame.reset();
+      }
+    }
+
+
     // tell game how many frames to simulate
-    response = m_sim_frames;
+    response = (is_rollback << 31) | (is_render << 30) | m_sim_frames;
 
     break;
   }
@@ -241,26 +281,22 @@ u32 CEXIStarpole::ImmRead(u32 size)
   case StarpoleCmd::NETSAVE:
     if (m_is_rollback_active)
     {
+      // placeholder seek code
       if (replay_state == StarpoleReplayState::PLAYBACK)
       {
-        #include <windows.h>
-
         // save state every 5 seconds
         if (cur_args % (5 * 60) == 0)
         {
-          m_savestate_frame_idx = (cur_args / 60) / 5;
-          m_playback_savestates->Save(m_savestate_frame_idx, m_file_frame_idx, m_game_frame_idx);
+          u32 save_idx = (cur_args / 60) / 5;
+          m_playback_savestates->Save(save_idx, m_file_frame_idx, m_game_frame_idx);
         }
 
-        std::optional<u32> load_idx;
-
-        if (GetAsyncKeyState(VK_RIGHT) & 0x1)
-          load_idx = ((cur_args + (5 * 60)) / 60) / 5;
-        else if (GetAsyncKeyState(VK_LEFT) & 0x1)
-          load_idx = ((cur_args - (5 * 60)) / 60) / 5;
-
-        if (load_idx.has_value())
-          m_playback_savestates->Load(load_idx.value(), &m_file_frame_idx, &m_game_frame_idx);
+        if (m_playback_desired_frame.has_value() && cur_args > m_playback_desired_frame.value())
+        {
+          u32 load_idx = (m_playback_desired_frame.value() / 60) / 5;
+          m_playback_savestates->Load(load_idx, &m_file_frame_idx,
+                                      &m_game_frame_idx);
+        }
       }
       else
       {
