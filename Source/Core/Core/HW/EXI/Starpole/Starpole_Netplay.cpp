@@ -192,6 +192,9 @@ void CEXIStarpole::Netsync_UpdateTimeSync()
   if (!NetPlay::IsNetPlayRunning())
     return;
 
+  if (m_is_spectator)
+    return;
+
   // handle time sync
   if (m_forward_frame % TIME_SYNC_INTERVAL == 0)
   {
