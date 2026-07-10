@@ -189,10 +189,7 @@ void CEXIStarpole::Netsync_SendInputs(u8* write_ptr)
 
 void CEXIStarpole::Netsync_UpdateTimeSync()
 {
-  if (!NetPlay::IsNetPlayRunning())
-    return;
-
-  if (m_is_spectator)
+  if (!NetPlay::IsNetPlayRunning() || m_is_spectator)
     return;
 
   // handle time sync

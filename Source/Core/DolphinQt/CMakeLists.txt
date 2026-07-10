@@ -355,6 +355,8 @@ add_executable(dolphin-emu
   QtUtils/WrapInScrollArea.h
   RenderWidget.cpp
   RenderWidget.h
+  ReplayScrubber.cpp
+  ReplayScrubber.h
   ResourcePackManager.cpp
   ResourcePackManager.h
   Resources.cpp

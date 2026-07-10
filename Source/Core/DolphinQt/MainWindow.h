@@ -47,6 +47,7 @@ class NetPlaySetupDialog;
 class NetworkWidget;
 class RegisterWidget;
 class RenderWidget;
+class ReplayScrubber;
 class SearchBar;
 class SettingsWindow;
 class SkylanderPortalWindow;
@@ -236,7 +237,9 @@ private:
   MenuBar* m_menu_bar;
   SearchBar* m_search_bar;
   GameList* m_game_list;
+  QWidget* m_render_container;
   RenderWidget* m_render_widget = nullptr;
+  ReplayScrubber* m_scrubber_widget = nullptr;
   bool m_rendering_to_main;
   bool m_stop_confirm_showing = false;
   bool m_stop_requested = false;

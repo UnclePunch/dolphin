@@ -245,32 +245,73 @@ u32 CEXIStarpole::ImmRead(u32 size)
 
       u32 cur_frame = cur_args;
 
-      if (GetAsyncKeyState(VK_RIGHT) & 0x1)
+      // if not currently seeking, check to seek
+      if (!m_playback_desired_frame.has_value())
       {
-        // to-do: improve this, check if i have a savestate i can jump to first
-        m_playback_desired_frame = cur_args + (5 * 60);
-        cur_frame = ((m_playback_desired_frame.value() / 60) / 5) * (5 * 60);
-      }
-      else if (GetAsyncKeyState(VK_LEFT) & 0x1)
-      {
-        m_playback_desired_frame = cur_args - (5 * 60);
-        cur_frame = ((m_playback_desired_frame.value() / 60) / 5) * (5 * 60);
+        std::optional<u32> ui_seek_frame = ReplayBridge_Get()->ConsumeSeek();
+
+        if (ui_seek_frame)
+          m_playback_desired_frame = ui_seek_frame;
+        else if (GetAsyncKeyState(VK_RIGHT) & 0x1)
+          m_playback_desired_frame = cur_args + (5 * 60);     // to-do: improve this, check if i have a savestate i can jump to first
+        else if (GetAsyncKeyState(VK_LEFT) & 0x1)
+          m_playback_desired_frame = cur_args - (5 * 60);
+
+        // seeking, find nearest savestate
+        if (m_playback_desired_frame.has_value())
+        {
+          // find the nearest savestate before our de
+          u32 save_idx = m_playback_desired_frame.value() / 60 / 5;
+          u32 nearest_save_idx = m_playback_savestates->GetSavestateFrameNearest(save_idx);
+          u32 nearest_save_frame = nearest_save_idx * 60 * 5;
+
+          // dont load state if we're seeking forward and the nearest savestate behind our current position (no point)
+          if (!(m_playback_desired_frame.value() > cur_args && nearest_save_frame < cur_args))
+          {
+            cur_frame = nearest_save_frame;
+            m_playback_req_load = nearest_save_idx;
+          }
+
+          // mute and unlock emu speed if we are fastforwarding
+          if (cur_frame < m_playback_desired_frame.value())
+            Config::SetCurrent(Config::MAIN_EMULATION_SPEED, 0.0f);
+        }
       }
 
-      if (m_playback_desired_frame.has_value() &&
-        cur_frame < m_playback_desired_frame.value())
+      if (m_playback_desired_frame.has_value())
       {
-        m_sim_frames = m_playback_desired_frame.value() - cur_frame;
-        if (m_sim_frames > MAX_ROLLBACK_NUM + 1)
+        if (PLAYBACK_UNLOCKSPEED)
         {
-          is_render = 0;
-          m_sim_frames = MAX_ROLLBACK_NUM + 1;
+          // frames left to sim to get to desired frame
+          if (cur_frame < m_playback_desired_frame.value())
+          {
+            m_sim_frames = 1;
+            is_render = 0;
+          }
+          else
+          {
+            m_playback_desired_frame.reset();
+            Config::SetCurrent(Config::MAIN_EMULATION_SPEED, 1.0f);
+          }
         }
         else
-          m_playback_desired_frame.reset();
+        {
+          // frames left to sim to get to desired frame
+          if (cur_frame < m_playback_desired_frame.value())
+            m_sim_frames = m_playback_desired_frame.value() - cur_frame;
+
+          // limit sim frames to max
+          if (m_sim_frames > MAX_SIM_FRAMES)
+          {
+            is_render = 0;
+            m_sim_frames = MAX_SIM_FRAMES;
+          }
+          else
+            m_playback_desired_frame.reset();
+        }
+        
       }
     }
-
 
     // tell game how many frames to simulate
     response = (is_rollback << 31) | (is_render << 30) | m_sim_frames;
@@ -291,11 +332,11 @@ u32 CEXIStarpole::ImmRead(u32 size)
           m_playback_savestates->Save(save_idx, m_file_frame_idx, m_game_frame_idx);
         }
 
-        if (m_playback_desired_frame.has_value() && cur_args > m_playback_desired_frame.value())
+        if (m_playback_req_load.has_value())
         {
-          u32 load_idx = (m_playback_desired_frame.value() / 60) / 5;
-          m_playback_savestates->Load(load_idx, &m_file_frame_idx,
+          m_playback_savestates->Load(m_playback_req_load.value(), &m_file_frame_idx,
                                       &m_game_frame_idx);
+          m_playback_req_load.reset();
         }
       }
       else

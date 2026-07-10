@@ -414,6 +414,7 @@ public:
   Savestate(std::vector<Starpole::DolDataSection> sections, u32 section_num, u32 savestate_num,
             Starpole::SaveKind state_kind, Core::System& system);
   ~Savestate();
+  u32 GetSavestateFrameNearest(u32 frame);
   bool Save(u32 frame_idx, u32 file_frame = 0, u32 game_frame = 0);
   bool Load(u32 frame_idx, u32 *file_frame = 0, u32 *game_frame = 0);
 
@@ -430,6 +431,50 @@ protected:
   Core::System& m_system;
 };
 }  // namespace Starpole
+
+class ReplayBridge
+{
+public:
+  ReplayBridge();
+  ~ReplayBridge();
+
+  bool IsVisible();
+
+  u32 GetCurrentFrame();
+  u32 GetTotalFrames();
+  u32 GetState();
+  bool GetShow();
+  bool GetHide();
+
+  void SetCurrentFrame(u32 frame);
+  void SetTotalFrames(u32 frames);
+  std::optional<u32> ConsumeSeek();
+  void SetShow();
+  void SetHide();
+  void SetSeek(u32 frame);
+
+private:
+  struct
+  {
+    bool is_visible = false;
+    int total_frames;
+    int current_frame;
+    int state;              // loading or playing i guess
+
+    std::atomic<bool> gui_req_show = false;
+    std::atomic<bool> gui_req_hide = false;
+    std::atomic<int> seek_frame = -1;
+  } data;
+
+protected:
+};
+
+// Replay Player
+static std::mutex crit_replay_bridge;
+static ReplayBridge* replay_bridge = nullptr;
+void ReplayBridge_Enable(ReplayBridge* const bridge);
+void ReplayBridge_Disable();
+ReplayBridge* ReplayBridge_Get();
 
 class CEXIStarpole final : public IEXIDevice
 {
@@ -491,7 +536,6 @@ private:
   u16 m_instance_idx;                             // number of times we switched between delay and rollback. inputs are stamped with this to know whether or not we should discard old inputs after an instance changes
   u32 m_instance_read_start;
 
-  
   static constexpr u32 PLAYBACK_SAVESTATE_NUM = (7 * 60) / 5;     // take a savestate every 5 seconds
   std::unique_ptr<Starpole::Savestate> m_playback_savestates;
 
@@ -558,6 +602,9 @@ private:
   void SaveState_Init(Starpole::DolDataSection* read_ptr, u32 section_num);
   void SaveState_End();
 
+  static constexpr bool PLAYBACK_UNLOCKSPEED = true;      // fastforward replay playback by uncapping emulation speed instead of processing the game loop 10x
+  static constexpr size_t MAX_SIM_FRAMES = 10;
+
   std::string m_name;
 
   StarpoleCmd cur_cmd = StarpoleCmd::NUM;  // current operation being carried out
@@ -581,7 +628,8 @@ private:
   bool is_playback_queued = 0;
   std::string replay_file_path = "";
 
-  std::optional<u32> m_playback_desired_frame;
+  std::optional<u32> m_playback_desired_frame = std::nullopt;
+  std::optional<u32> m_playback_req_load = std::nullopt;     // savestate index to load
 
 };
 

@@ -192,6 +192,7 @@ Savestate::Savestate(std::vector<DolDataSection> sections, u32 section_num,
         reinterpret_cast<SavestateHeader*>(m_alloc.get() + (savestate_size * save_idx));
 
     state_header->chunk_num = chunk_num;
+    state_header->frame_idx = -1;         // init as unused
 
     size_t this_chunk_data_offset = sizeof(SavestateHeader) + (sizeof(SavestateChunk) * chunk_num);
 
@@ -268,6 +269,26 @@ SavestateHeader* Savestate::GetFrame(u32 frame_idx)
       reinterpret_cast<SavestateHeader*>(m_alloc.get() + (m_state_size * save_idx));
 
   return savestate;
+}
+
+u32 Savestate::GetSavestateFrameNearest(u32 frame)
+{
+  u32 state_idx = 0;
+  u32 nearest_frame = 0;
+
+  for (u32 i = 0; i < m_state_num; i++)
+  {
+    u32 state_frame = GetFrame(i)->frame_idx;
+
+    if (state_frame != -1 &&
+        state_frame > nearest_frame && state_frame <= frame)
+    {
+      state_idx = i;
+      nearest_frame = state_frame;
+    }
+  }
+
+  return state_idx;
 }
 
 bool Savestate::Save(u32 frame_idx, u32 file_frame, u32 game_frame)
