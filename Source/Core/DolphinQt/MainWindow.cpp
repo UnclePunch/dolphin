@@ -1289,6 +1289,9 @@ void MainWindow::HideRenderWidget(bool reinit, bool is_exit)
     // Put the new render widget back at the top of the layout, above the scrubber
     static_cast<QVBoxLayout*>(m_render_container->layout())->insertWidget(0, m_render_widget, 1);
 
+    // hide scrubber too
+    m_scrubber_widget->hide();
+
     // The controller interface will still be registered to the old render widget, if the core
     // has booted. Therefore, we should re-bind it to the main window for now. When the core
     // is next started, it will be swapped back to the new render widget.

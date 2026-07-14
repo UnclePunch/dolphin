@@ -82,6 +82,7 @@ void ReplayScrubber::OnSliderReleased()
 {
   const u32 frame = static_cast<u32>(m_slider->value() * 60);
   m_bridge->SetSeek(frame);
+  m_bridge->SetCurrentFrame(frame);   // might fix the slider jumping around
 }
 
 void ReplayScrubber::Update()

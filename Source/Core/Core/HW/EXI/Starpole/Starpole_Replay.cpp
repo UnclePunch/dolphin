@@ -97,10 +97,13 @@ void CEXIStarpole::Frame_Receive(u8* read_ptr, u32 size)
 void CEXIStarpole::MatchEnd_Receive()
 {
   if (replay_state == StarpoleReplayState::PLAYBACK)
-    ReplayBridge_Get()->SetHide();  // signal to hide playback UI
+  {
+    // hide playback UI if we didn't start another one
+    if (!is_playback_starting)
+      ReplayBridge_Get()->SetHide();  // signal to hide playback UI
 
-  if (replay_state != StarpoleReplayState::RECORD)
     return;
+  }
 
   int terminator = -1;
   WriteFile((uint8_t*)&terminator, sizeof(terminator));
@@ -211,6 +214,7 @@ void CEXIStarpole::Match_Send(u8* write_ptr)
 
   m_file_frame_idx = 0;
   m_game_frame_idx = 0;
+  is_playback_starting = false;  // lower flag used to detect back to back replay playback
   replay_state = StarpoleReplayState::PLAYBACK;
 
   ReplayBridge_Get()->SetCurrentFrame(m_game_frame_idx);

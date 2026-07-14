@@ -625,6 +625,7 @@ private:
   // file
   std::unique_ptr<StreamWriter> writer;
   std::unique_ptr<StreamReader> reader;
+  bool is_playback_starting = false;
   bool is_playback_queued = 0;
   std::string replay_file_path = "";
 

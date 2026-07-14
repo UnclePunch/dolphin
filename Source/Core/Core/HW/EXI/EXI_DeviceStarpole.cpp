@@ -199,6 +199,7 @@ u32 CEXIStarpole::ImmRead(u32 size)
       response = 1;
 
       is_playback_queued = 0;
+      is_playback_starting = true;
     }
     else
       response = 0;
@@ -273,20 +274,22 @@ u32 CEXIStarpole::ImmRead(u32 size)
           }
 
           // mute and unlock emu speed if we are fastforwarding
-          if (cur_frame < m_playback_desired_frame.value())
+          if (PLAYBACK_UNLOCKSPEED && cur_frame < m_playback_desired_frame.value())
             Config::SetCurrent(Config::MAIN_EMULATION_SPEED, 0.0f);
         }
       }
 
       if (m_playback_desired_frame.has_value())
       {
+        // always skip render for at least 1 frame if seeking (game ties mute/unmute logic to render toggling lol)
+        is_render = 0;
+
         if (PLAYBACK_UNLOCKSPEED)
         {
           // frames left to sim to get to desired frame
           if (cur_frame < m_playback_desired_frame.value())
           {
             m_sim_frames = 1;
-            is_render = 0;
           }
           else
           {
