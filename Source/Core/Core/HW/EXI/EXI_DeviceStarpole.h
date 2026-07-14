@@ -373,7 +373,8 @@ struct DolDataSection
 {
   u32 address;
   u32 size;
-  int is_audio;
+  u16 is_backup;
+  u16 is_audio;
 };
 
 struct CpuState

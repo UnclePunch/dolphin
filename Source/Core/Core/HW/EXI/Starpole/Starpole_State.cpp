@@ -229,24 +229,35 @@ std::vector<std::pair<u32, u32>> Savestate::GetChunkSizes(std::vector<DolDataSec
     u32 ex_start = ex.address;
     u32 ex_end = ex.address + ex.size;
 
-    // temp: skip audio sections
-    if (save_kind == SaveKind::Full && ex.is_audio == 1)
-      continue;
+    INFO_LOG_FMT(EXPANSIONINTERFACE, "start {:08X}, end {:08X}, is_backup {}", ex_start, ex_end, ex.is_backup);
 
-    // No overlap
-    if (ex_end <= current || ex_start >= section_end)
-      continue;
-
-    // Copy region before exclusion
-    if (ex_start > current)
+    if (ex.is_backup)
     {
-      u32 chunk_size = ex_start - current;
-      u8* ptr = m_system.GetMemory().GetPointerForRange(current, chunk_size);
+      u8* ptr = m_system.GetMemory().GetPointerForRange(ex_start, ex.size);
       if (ptr)
-        chunks.push_back({current, chunk_size});
+        chunks.push_back({current, ex.size});
     }
+    else
+    {
+      // always backup audio sections on full savestates
+      if (save_kind == SaveKind::Full && ex.is_audio == 1)
+        continue;
 
-    current = std::max(current, ex_end);
+      // No overlap
+      if (ex_end <= current || ex_start >= section_end)
+        continue;
+
+      // Copy region before exclusion
+      if (ex_start > current)
+      {
+        u32 chunk_size = ex_start - current;
+        u8* ptr = m_system.GetMemory().GetPointerForRange(current, chunk_size);
+        if (ptr)
+          chunks.push_back({current, chunk_size});
+      }
+
+      current = std::max(current, ex_end);
+    }
   }
 
   // Copy tail after last exclusion
@@ -461,10 +472,11 @@ void CEXIStarpole::SaveState_Init(Starpole::DolDataSection* read_ptr, u32 sectio
   {
     sections[i].address = Common::swap32(read_ptr[i].address);
     sections[i].size = Common::swap32(read_ptr[i].size);
-    sections[i].is_audio = Common::swap32(read_ptr[i].is_audio);
+    sections[i].is_backup = Common::swap16(read_ptr[i].is_backup);
+    sections[i].is_audio = Common::swap16(read_ptr[i].is_audio);
   }
 
-  m_rollback_savestates = std::make_unique<Starpole::Savestate>(sections, section_num, MAX_SAVESTATES, Starpole::SaveKind::Partial, m_system);
+  m_rollback_savestates = std::make_unique<Starpole::Savestate>(sections, section_num, MAX_SAVESTATES, Starpole::SaveKind::Full, m_system);
   m_playback_savestates = std::make_unique<Starpole::Savestate>(sections, section_num, PLAYBACK_SAVESTATE_NUM, Starpole::SaveKind::Full, m_system);
 
   //m_savestate_alloc = SaveState_Alloc(sections, section_num, (7 * 60 * 60) / 5, StarpoleSavestate::Full);
