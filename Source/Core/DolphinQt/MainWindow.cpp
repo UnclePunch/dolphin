@@ -116,6 +116,7 @@
 #include "DolphinQt/QtUtils/RunOnObject.h"
 #include "DolphinQt/QtUtils/WindowActivationEventFilter.h"
 #include "DolphinQt/RenderWidget.h"
+#include "DolphinQt/RenderWindow.h"
 #include "DolphinQt/ReplayScrubber.h"
 #include "DolphinQt/ResourcePackManager.h"
 #include "DolphinQt/Resources.h"
@@ -460,17 +461,9 @@ void MainWindow::CreateComponents()
   m_tool_bar = new ToolBar(this);
   m_search_bar = new SearchBar(this);
   m_game_list = new GameList(this);
-  m_render_widget = new RenderWidget;
-  m_scrubber_widget = new ReplayScrubber;
+  m_render_window = new RenderWindow;
+  m_render_widget = m_render_window->m_render_widget;
   m_stack = new QStackedWidget(this);
-
-  // create render container
-  m_render_container = new QWidget;
-  QVBoxLayout* layout = new QVBoxLayout(m_render_container);
-  layout->setContentsMargins(0, 0, 0, 0);
-  layout->setSpacing(0);
-  layout->addWidget(m_render_widget, 1);
-  layout->addWidget(m_scrubber_widget, 0);
 
   for (int i = 0; i < 4; i++)
   {
@@ -732,7 +725,7 @@ void MainWindow::ConnectGameList()
 void MainWindow::ConnectRenderWidget()
 {
   m_rendering_to_main = false;
-  m_render_container->hide();
+  m_render_window->Hide();
   connect(m_render_widget, &RenderWidget::Closed, this, &MainWindow::ForceStop);
   connect(m_render_widget, &RenderWidget::FocusChanged, this, [this](bool focus) {
     if (m_render_widget->isFullScreen())
@@ -1235,7 +1228,7 @@ void MainWindow::ShowRenderWidget()
     // If we're rendering to main, add it to the stack and update our title when necessary.
     m_rendering_to_main = true;
 
-    m_stack->setCurrentIndex(m_stack->addWidget(m_render_container));
+    m_stack->setCurrentIndex(m_stack->addWidget(m_render_window));
     connect(Host::GetInstance(), &Host::RequestTitle, this, &MainWindow::setWindowTitle);
     m_stack->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
     m_stack->repaint();
@@ -1247,8 +1240,7 @@ void MainWindow::ShowRenderWidget()
     // Otherwise, just show it.
     m_rendering_to_main = false;
 
-    m_render_container->showNormal();
-    m_render_container->restoreGeometry(m_render_widget_geometry);
+    m_render_window->Show();
   }
 }
 
@@ -1258,8 +1250,8 @@ void MainWindow::HideRenderWidget(bool reinit, bool is_exit)
   {
     // Remove the widget from the stack and reparent it to nullptr, so that it can draw
     // itself in a new window if it wants. Disconnect the title updates.
-    m_stack->removeWidget(m_render_container);
-    m_render_container->setParent(nullptr);
+    m_stack->removeWidget(m_render_window);
+    m_render_window->setParent(nullptr);
     m_rendering_to_main = false;
     m_stack->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
     disconnect(Host::GetInstance(), &Host::RequestTitle, this, &MainWindow::setWindowTitle);
@@ -1271,13 +1263,15 @@ void MainWindow::HideRenderWidget(bool reinit, bool is_exit)
   // recreated
   if (reinit)
   {
-    m_render_widget->hide();
+    m_render_window->Hide();
+
     disconnect(m_render_widget, &RenderWidget::Closed, this, &MainWindow::ForceStop);
-
     m_render_widget->removeEventFilter(this);
-    m_render_widget->deleteLater();
 
-    m_render_widget = new RenderWidget;
+    m_render_window->deleteLater();
+
+    m_render_window = new RenderWindow;
+    m_render_widget = m_render_window->m_render_widget;
 
     m_render_widget->installEventFilter(this);
     connect(m_render_widget, &RenderWidget::Closed, this, &MainWindow::ForceStop);
@@ -1287,10 +1281,10 @@ void MainWindow::HideRenderWidget(bool reinit, bool is_exit)
     });
 
     // Put the new render widget back at the top of the layout, above the scrubber
-    static_cast<QVBoxLayout*>(m_render_container->layout())->insertWidget(0, m_render_widget, 1);
+    // static_cast<QVBoxLayout*>(m_render_container->layout())->insertWidget(0, m_render_widget, 1);
 
     // hide scrubber too
-    m_scrubber_widget->hide();
+    // m_scrubber_widget->hide();
 
     // The controller interface will still be registered to the old render widget, if the core
     // has booted. Therefore, we should re-bind it to the main window for now. When the core

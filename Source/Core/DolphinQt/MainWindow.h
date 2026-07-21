@@ -46,6 +46,7 @@ class NetPlayDialog;
 class NetPlaySetupDialog;
 class NetworkWidget;
 class RegisterWidget;
+class RenderWindow;
 class RenderWidget;
 class ReplayScrubber;
 class SearchBar;
@@ -238,6 +239,7 @@ private:
   SearchBar* m_search_bar;
   GameList* m_game_list;
   QWidget* m_render_container;
+  RenderWindow* m_render_window = nullptr;
   RenderWidget* m_render_widget = nullptr;
   ReplayScrubber* m_scrubber_widget = nullptr;
   bool m_rendering_to_main;

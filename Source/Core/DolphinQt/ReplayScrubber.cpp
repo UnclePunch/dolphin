@@ -20,7 +20,7 @@ ReplayScrubber::ReplayScrubber(QWidget* parent) : QWidget(parent)
   ConnectWidgets();
 
   // setFixedHeight(32);
-  setHidden(true);
+  // setHidden(true);
 
   installEventFilter(this);
 

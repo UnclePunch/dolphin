@@ -17,4 +17,19 @@ class RenderWindow final : public QWidget
 
 public:
   explicit RenderWindow(QWidget* parent = nullptr);
+  bool event(QEvent* event) override;
+  void Show();
+  void Hide();
+  RenderWidget *m_render_widget = nullptr;
+
+signals:
+  void EscapePressed();
+  void Closed();
+  void HandleChanged(void* handle);
+  void StateChanged(bool fullscreen);
+  void SizeChanged(int new_width, int new_height);
+  void FocusChanged(bool focus);
+
+private:
+  ReplayScrubber* m_scrubber_widget;
 };
