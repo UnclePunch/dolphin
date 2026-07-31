@@ -435,7 +435,6 @@ void MainWindow::InitCoreCallbacks()
     }
   });
   installEventFilter(this);
-  // m_render_widget->installEventFilter(this);
   m_render_window->installEventFilter(this);
 
   // Handle file open events
@@ -1159,6 +1158,8 @@ void MainWindow::StartGame(std::unique_ptr<BootParameters>&& parameters)
 
   // We need the render widget before booting.
   ShowRenderWidget();
+  //HideRenderWidget();
+  //ShowRenderWidget();
 
   if (parameters->riivolution_patches.size() == 0)
   {
@@ -1228,6 +1229,8 @@ void MainWindow::ShowRenderWidget()
   {
     // If we're rendering to main, add it to the stack and update our title when necessary.
     m_rendering_to_main = true;
+
+    m_render_window->showNormal();
 
     m_stack->setCurrentIndex(m_stack->addWidget(m_render_window));
     connect(Host::GetInstance(), &Host::RequestTitle, this, &MainWindow::setWindowTitle);
