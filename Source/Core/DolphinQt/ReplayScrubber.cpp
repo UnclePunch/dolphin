@@ -42,15 +42,10 @@ void ReplayScrubber::CreateWidgets()
   setLayout(layout);
 }
 
-void ReplayScrubber::Show()
+void ReplayScrubber::showNormal()
 {
   m_slider->setRange(0, m_bridge->GetTotalFrames() / 60);
-  show();
-}
-
-void ReplayScrubber::Hide()
-{
-  hide();
+  QWidget::showNormal();
 }
 
 void ReplayScrubber::ConnectWidgets()
@@ -88,9 +83,9 @@ void ReplayScrubber::OnSliderReleased()
 void ReplayScrubber::Update()
 {
   if (m_bridge->GetShow())
-    Show();
+    showNormal();
   else if (m_bridge->GetHide())
-    Hide();
+    hide();
 
   u32 cur_frame_idx = m_bridge->GetCurrentFrame();
   const u32 cur_total_seconds = cur_frame_idx / 60;

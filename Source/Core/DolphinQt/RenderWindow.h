@@ -17,9 +17,10 @@ class RenderWindow final : public QWidget
 
 public:
   explicit RenderWindow(QWidget* parent = nullptr);
+  void showFullScreen();
   bool event(QEvent* event) override;
-  void Show();
-  void Hide();
+  void showNormal();
+  void hide();
   RenderWidget *m_render_widget = nullptr;
 
 signals:
@@ -32,4 +33,5 @@ signals:
 
 private:
   ReplayScrubber* m_scrubber_widget;
+  void OnHandleChanged(void* handle);
 };

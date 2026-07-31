@@ -44,16 +44,8 @@
 
 RenderWidget::RenderWidget(QWidget* parent) : QWidget(parent)
 {
-  setWindowTitle(QStringLiteral("Dolphin"));
-  setWindowIcon(Resources::GetAppIcon());
-  setWindowRole(QStringLiteral("renderer"));
   setAcceptDrops(true);
 
-  QPalette p;
-  p.setColor(QPalette::Window, Qt::black);
-  setPalette(p);
-
-  connect(Host::GetInstance(), &Host::RequestTitle, this, &RenderWidget::setWindowTitle);
   connect(Host::GetInstance(), &Host::RequestRenderSize, this, [this](int w, int h) {
     if (!Config::Get(Config::MAIN_RENDER_WINDOW_AUTOSIZE) || isFullScreen() || isMaximized())
       return;
@@ -70,13 +62,9 @@ RenderWidget::RenderWidget(QWidget* parent) : QWidget(parent)
 
   // We have to use Qt::DirectConnection here because we don't want those signals to get queued
   // (which results in them not getting called)
-  connect(this, &RenderWidget::StateChanged, Host::GetInstance(), &Host::SetRenderFullscreen,
-          Qt::DirectConnection);
   connect(this, &RenderWidget::HandleChanged, this, &RenderWidget::OnHandleChanged,
           Qt::DirectConnection);
   connect(this, &RenderWidget::SizeChanged, Host::GetInstance(), &Host::ResizeSurface,
-          Qt::DirectConnection);
-  connect(this, &RenderWidget::FocusChanged, Host::GetInstance(), &Host::SetRenderFocus,
           Qt::DirectConnection);
 
   m_mouse_timer = new QTimer(this);
@@ -166,7 +154,6 @@ void RenderWidget::OnHandleChanged(void* handle)
                           &corner_preference, sizeof(corner_preference));
 #endif
   }
-  Host::GetInstance()->SetRenderHandle(handle);
 }
 
 void RenderWidget::OnHideCursorChanged()
@@ -465,8 +452,6 @@ bool RenderWidget::event(QEvent* event)
       }
       m_lock_cursor_on_next_activation = false;
     }
-
-    emit FocusChanged(true);
     break;
   case QEvent::WindowDeactivate:
     SetCursorLocked(false);
@@ -485,8 +470,6 @@ bool RenderWidget::event(QEvent* event)
         Core::SetState(Core::System::GetInstance(), Core::State::Paused);
       }
     }
-
-    emit FocusChanged(false);
     break;
   case QEvent::Move:
     SetCursorLocked(m_cursor_locked);
@@ -525,10 +508,6 @@ bool RenderWidget::event(QEvent* event)
   case QEvent::WindowStateChange:
     // Lock the mouse again when fullscreen changes (we might have missed some events)
     SetCursorLocked(m_cursor_locked || (isFullScreen() && Settings::Instance().GetLockCursor()));
-    emit StateChanged(isFullScreen());
-    break;
-  case QEvent::Close:
-    emit Closed();
     break;
   default:
     break;

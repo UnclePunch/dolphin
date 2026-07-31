@@ -16,8 +16,7 @@ class ReplayScrubber : public QWidget
 public:
   explicit ReplayScrubber(QWidget* parent = nullptr);
 
-  void Show();
-  void Hide();
+  void showNormal();
 
 private:
   void CreateWidgets();

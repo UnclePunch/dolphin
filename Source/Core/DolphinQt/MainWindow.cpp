@@ -353,7 +353,7 @@ MainWindow::~MainWindow()
   AchievementManager::GetInstance().Shutdown();
 #endif  // USE_RETRO_ACHIEVEMENTS
 
-  delete m_render_widget;
+  delete m_render_window;
   delete m_netplay_dialog;
 
   for (int i = 0; i < 4; i++)
@@ -380,7 +380,7 @@ MainWindow::~MainWindow()
 
 WindowSystemInfo MainWindow::GetWindowSystemInfo() const
 {
-  return ::GetWindowSystemInfo(m_render_widget->windowHandle());
+  return ::GetWindowSystemInfo(m_render_window->windowHandle());
 }
 
 void MainWindow::InitControllers()
@@ -435,7 +435,8 @@ void MainWindow::InitCoreCallbacks()
     }
   });
   installEventFilter(this);
-  m_render_widget->installEventFilter(this);
+  // m_render_widget->installEventFilter(this);
+  m_render_window->installEventFilter(this);
 
   // Handle file open events
   auto* filter = new FileOpenEventFilter(QGuiApplication::instance());
@@ -725,10 +726,10 @@ void MainWindow::ConnectGameList()
 void MainWindow::ConnectRenderWidget()
 {
   m_rendering_to_main = false;
-  m_render_window->Hide();
-  connect(m_render_widget, &RenderWidget::Closed, this, &MainWindow::ForceStop);
-  connect(m_render_widget, &RenderWidget::FocusChanged, this, [this](bool focus) {
-    if (m_render_widget->isFullScreen())
+  m_render_window->hide();
+  connect(m_render_window, &RenderWindow::Closed, this, &MainWindow::ForceStop);
+  connect(m_render_window, &RenderWindow::FocusChanged, this, [this](bool focus) {
+    if (m_render_window->isFullScreen())
       SetFullScreenResolution(focus);
   });
 }
@@ -936,7 +937,7 @@ bool MainWindow::RequestStop()
   const bool was_cursor_locked = m_render_widget->IsCursorLocked();
 
   if (!m_render_widget->isFullScreen())
-    m_render_widget_geometry = m_render_widget->saveGeometry();
+    m_render_widget_geometry = m_render_window->saveGeometry();
   else
     FullScreen();
 
@@ -1063,10 +1064,10 @@ void MainWindow::FullScreen()
   // If the render widget is fullscreen we want to reset it to whatever is in
   // settings. If it's set to be fullscreen then it just remakes the window,
   // which probably isn't ideal.
-  bool was_fullscreen = m_render_widget->isFullScreen();
+  bool was_fullscreen = m_render_window->isFullScreen();
 
   if (!was_fullscreen)
-    m_render_widget_geometry = m_render_widget->saveGeometry();
+    m_render_widget_geometry = m_render_window->saveGeometry();
 
   HideRenderWidget(false);
   SetFullScreenResolution(!was_fullscreen);
@@ -1077,13 +1078,13 @@ void MainWindow::FullScreen()
   }
   else
   {
-    m_render_widget->showFullScreen();
+    m_render_window->showFullScreen();
   }
 }
 
 void MainWindow::UnlockCursor()
 {
-  if (!m_render_widget->isFullScreen())
+  if (!m_render_window->isFullScreen())
     m_render_widget->SetCursorLocked(false);
 }
 
@@ -1240,7 +1241,8 @@ void MainWindow::ShowRenderWidget()
     // Otherwise, just show it.
     m_rendering_to_main = false;
 
-    m_render_window->Show();
+    m_render_window->showNormal();
+    m_render_window->restoreGeometry(m_render_widget_geometry);
   }
 }
 
@@ -1263,22 +1265,22 @@ void MainWindow::HideRenderWidget(bool reinit, bool is_exit)
   // recreated
   if (reinit)
   {
-    m_render_window->Hide();
+    m_render_window->hide();
 
-    disconnect(m_render_widget, &RenderWidget::Closed, this, &MainWindow::ForceStop);
-    m_render_widget->removeEventFilter(this);
+    disconnect(m_render_window, &RenderWindow::Closed, this, &MainWindow::ForceStop);
+    m_render_window->removeEventFilter(this);
 
     m_render_window->deleteLater();
 
     m_render_window = new RenderWindow;
     m_render_widget = m_render_window->m_render_widget;
 
-    m_render_widget->installEventFilter(this);
-    connect(m_render_widget, &RenderWidget::Closed, this, &MainWindow::ForceStop);
-    connect(m_render_widget, &RenderWidget::FocusChanged, this, [this](bool focus) {
-      if (m_render_widget->isFullScreen())
-        SetFullScreenResolution(focus);
-    });
+    m_render_window->installEventFilter(this);
+    connect(m_render_window, &RenderWindow::Closed, this, &MainWindow::ForceStop);
+    connect(m_render_window, &RenderWindow::FocusChanged, this, [this](bool focus) {
+      if (m_render_window->isFullScreen())
+         SetFullScreenResolution(focus);
+     });
 
     // Put the new render widget back at the top of the layout, above the scrubber
     // static_cast<QVBoxLayout*>(m_render_container->layout())->insertWidget(0, m_render_widget, 1);
