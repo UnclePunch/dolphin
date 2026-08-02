@@ -225,6 +225,7 @@
     <ClCompile Include="QtUtils\WrapInScrollArea.cpp" />
     <ClCompile Include="RenderWidget.cpp" />
     <ClCompile Include="RenderWindow.cpp" />
+    <ClCompile Include="ReplayHost.cpp" />
     <ClCompile Include="ReplayScrubber.cpp" />
     <ClCompile Include="ResourcePackManager.cpp" />
     <ClCompile Include="Resources.cpp" />
@@ -286,6 +287,7 @@
     <ClInclude Include="QtUtils\RunOnObject.h" />
     <ClInclude Include="QtUtils\SignalBlocking.h" />
     <ClInclude Include="QtUtils\WrapInScrollArea.h" />
+    <ClInclude Include="ReplayHost.h" />
     <ClInclude Include="ResourcePackManager.h" />
     <ClInclude Include="Resources.h" />
     <ClInclude Include="Settings\OnScreenDisplayPane.h" />
@@ -417,6 +419,7 @@
     <QtMoc Include="GCMemcardCreateNewDialog.h" />
     <QtMoc Include="GCMemcardManager.h" />
     <QtMoc Include="Host.h" />
+    <QtMoc Include="ReplayHost.h" />
     <QtMoc Include="HotkeyScheduler.h" />
     <QtMoc Include="InfinityBase/InfinityBaseWindow.h" />
     <QtMoc Include="MainWindow.h" />

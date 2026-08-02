@@ -1158,8 +1158,6 @@ void MainWindow::StartGame(std::unique_ptr<BootParameters>&& parameters)
 
   // We need the render widget before booting.
   ShowRenderWidget();
-  //HideRenderWidget();
-  //ShowRenderWidget();
 
   if (parameters->riivolution_patches.size() == 0)
   {

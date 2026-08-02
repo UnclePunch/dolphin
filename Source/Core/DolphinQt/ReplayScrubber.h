@@ -15,8 +15,11 @@ class ReplayScrubber : public QWidget
   Q_OBJECT
 public:
   explicit ReplayScrubber(QWidget* parent = nullptr);
-
   void showNormal();
+
+signals:
+  void SeekFrame(u32 frame);
+  void SetCurrentFrame(u32 frame);
 
 private:
   void CreateWidgets();
@@ -28,9 +31,4 @@ private:
 
   QLabel* m_time_label;
   QSlider* m_slider;
-
-  QLineEdit* m_search_edit;
-  QPushButton* m_close_button;
-
-  ExpansionInterface::ReplayBridge* m_bridge;
 };

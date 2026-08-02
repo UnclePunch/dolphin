@@ -433,50 +433,6 @@ protected:
 };
 }  // namespace Starpole
 
-class ReplayBridge
-{
-public:
-  ReplayBridge();
-  ~ReplayBridge();
-
-  bool IsVisible();
-
-  u32 GetCurrentFrame();
-  u32 GetTotalFrames();
-  u32 GetState();
-  bool GetShow();
-  bool GetHide();
-
-  void SetCurrentFrame(u32 frame);
-  void SetTotalFrames(u32 frames);
-  std::optional<u32> ConsumeSeek();
-  void SetShow();
-  void SetHide();
-  void SetSeek(u32 frame);
-
-private:
-  struct
-  {
-    bool is_visible = false;
-    int total_frames;
-    int current_frame;
-    int state;              // loading or playing i guess
-
-    std::atomic<bool> gui_req_show = false;
-    std::atomic<bool> gui_req_hide = false;
-    std::atomic<int> seek_frame = -1;
-  } data;
-
-protected:
-};
-
-// Replay Player
-static std::mutex crit_replay_bridge;
-static ReplayBridge* replay_bridge = nullptr;
-void ReplayBridge_Enable(ReplayBridge* const bridge);
-void ReplayBridge_Disable();
-ReplayBridge* ReplayBridge_Get();
-
 class CEXIStarpole final : public IEXIDevice
 {
 public:
@@ -637,3 +593,13 @@ private:
 
 ExpansionInterface::CEXIStarpole* Starpole_Get();
 }  // namespace ExpansionInterface
+
+std::optional<u32> ReplayHost_ConsumeSeek();
+u32 ReplayHost_GetCurrentFrame();
+void ReplayHost_SetCurrentFrame(u32 frame);
+void ReplayHost_SetTotalFrames(u32 frames);
+u32 ReplayHost_GetTotalFrames();
+void ReplayHost_SetHide();
+bool ReplayHost_GetHide();
+void ReplayHost_SetShow();
+bool ReplayHost_GetShow();

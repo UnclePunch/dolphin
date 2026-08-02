@@ -249,7 +249,7 @@ u32 CEXIStarpole::ImmRead(u32 size)
       // if not currently seeking, check to seek
       if (!m_playback_desired_frame.has_value())
       {
-        std::optional<u32> ui_seek_frame = ReplayBridge_Get()->ConsumeSeek();
+        std::optional<u32> ui_seek_frame = ReplayHost_ConsumeSeek();
 
         if (ui_seek_frame)
           m_playback_desired_frame = ui_seek_frame;

@@ -24,7 +24,6 @@ public:
   RenderWidget *m_render_widget = nullptr;
 
 signals:
-  void EscapePressed();
   void Closed();
   void HandleChanged(void* handle);
   void StateChanged(bool fullscreen);

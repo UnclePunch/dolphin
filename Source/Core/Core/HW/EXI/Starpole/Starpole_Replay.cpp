@@ -100,7 +100,7 @@ void CEXIStarpole::MatchEnd_Receive()
   {
     // hide playback UI if we didn't start another one
     if (!is_playback_starting)
-      ReplayBridge_Get()->SetHide();  // signal to hide playback UI
+      ReplayHost_SetHide();  // signal to hide playback UI
 
     return;
   }
@@ -217,9 +217,9 @@ void CEXIStarpole::Match_Send(u8* write_ptr)
   is_playback_starting = false;  // lower flag used to detect back to back replay playback
   replay_state = StarpoleReplayState::PLAYBACK;
 
-  ReplayBridge_Get()->SetCurrentFrame(m_game_frame_idx);
-  ReplayBridge_Get()->SetTotalFrames(7 * 60 * 60);
-  ReplayBridge_Get()->SetShow(); // signal to show playback UI
+  ReplayHost_SetCurrentFrame(m_game_frame_idx);
+  ReplayHost_SetTotalFrames(7 * 60 * 60);
+  ReplayHost_SetShow();  // signal to show playback UI
 }
 
 int CEXIStarpole::DolphinData_Prepare()
@@ -279,7 +279,7 @@ void CEXIStarpole::Frame_Send(u8* write_ptr, u32 index)
   memcpy(write_ptr, (void*)&frame, sizeof(frame));
 
   m_game_frame_idx = index;  // update the game frame we are on
-  ReplayBridge_Get()->SetCurrentFrame(m_game_frame_idx);
+  ReplayHost_SetCurrentFrame(m_game_frame_idx);
 }
 
 bool CEXIStarpole::Frame_Read(StarpoleDataFrame* frame, u32 file_frame_index)

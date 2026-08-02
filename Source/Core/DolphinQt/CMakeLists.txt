@@ -353,6 +353,8 @@ add_executable(dolphin-emu
   QtUtils/WindowActivationEventFilter.h
   QtUtils/WrapInScrollArea.cpp
   QtUtils/WrapInScrollArea.h
+  ReplayHost.cpp
+  ReplayHost.h
   RenderWidget.cpp
   RenderWidget.h
   RenderWindow.cpp

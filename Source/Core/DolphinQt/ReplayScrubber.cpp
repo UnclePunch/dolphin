@@ -3,8 +3,7 @@
 
 #include "DolphinQt/ReplayScrubber.h"
 #include "DolphinQt/ClickSlider.h"
-
-#include "Core/HW/EXI/EXI_DeviceStarpole.h"
+#include "DolphinQt/ReplayHost.h"
 
 #include <QEvent>
 #include <QHBoxLayout>
@@ -19,13 +18,7 @@ ReplayScrubber::ReplayScrubber(QWidget* parent) : QWidget(parent)
   CreateWidgets();
   ConnectWidgets();
 
-  // setFixedHeight(32);
-  // setHidden(true);
-
   installEventFilter(this);
-
-  // create replay player bridge
-  m_bridge = new ExpansionInterface::ReplayBridge();
 }
 
 void ReplayScrubber::CreateWidgets()
@@ -44,7 +37,7 @@ void ReplayScrubber::CreateWidgets()
 
 void ReplayScrubber::showNormal()
 {
-  m_slider->setRange(0, m_bridge->GetTotalFrames() / 60);
+  m_slider->setRange(0, ReplayHost_GetTotalFrames());
   QWidget::showNormal();
 }
 
@@ -58,41 +51,40 @@ void ReplayScrubber::ConnectWidgets()
   connect(timer, &QTimer::timeout, this, &ReplayScrubber::Update);
   connect(m_slider, &ClickSlider::sliderReleased, this, &ReplayScrubber::OnSliderReleased);
 
-  //connect(m_search_edit, &QLineEdit::textChanged, this, &ReplayScrubber::Search);
-  //connect(m_close_button, &QPushButton::clicked, this, &ReplayScrubber::Hide);
+  connect(this, &ReplayScrubber::SeekFrame, ReplayHost::GetInstance(), &ReplayHost::ReqSeek,
+          Qt::DirectConnection);
+  connect(this, &ReplayScrubber::SetCurrentFrame, ReplayHost::GetInstance(), &ReplayHost::SetCurrentFrame,
+          Qt::DirectConnection);
 }
 
 bool ReplayScrubber::eventFilter(QObject* object, QEvent* event)
 {
-  //if (event->type() == QEvent::KeyPress)
-  //{
-  //  if (static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape)
-  //    Hide();
-  //}
-
   return false;
 }
 
 void ReplayScrubber::OnSliderReleased()
 {
-  const u32 frame = static_cast<u32>(m_slider->value() * 60);
-  m_bridge->SetSeek(frame);
-  m_bridge->SetCurrentFrame(frame);   // might fix the slider jumping around
+  const u32 frame = static_cast<u32>(m_slider->value());
+  emit SeekFrame(frame);
+  emit SetCurrentFrame(frame);
+
+  //m_bridge->SetSeek(frame);
+  //m_bridge->SetCurrentFrame(frame);   // might fix the slider jumping around
 }
 
 void ReplayScrubber::Update()
 {
-  if (m_bridge->GetShow())
+  if (ReplayHost_GetShow())
     showNormal();
-  else if (m_bridge->GetHide())
+  else if (ReplayHost_GetHide())
     hide();
 
-  u32 cur_frame_idx = m_bridge->GetCurrentFrame();
+  u32 cur_frame_idx = ReplayHost_GetCurrentFrame();
   const u32 cur_total_seconds = cur_frame_idx / 60;
   const u32 cur_minutes = cur_total_seconds / 60;
   const u32 cur_seconds = cur_total_seconds % 60;
 
-  u32 end_frame_idx = m_bridge->GetTotalFrames();
+  u32 end_frame_idx = ReplayHost_GetTotalFrames();
   const u32 end_total_seconds = end_frame_idx / 60;
   const u32 end_minutes = end_total_seconds / 60;
   const u32 end_seconds = end_total_seconds % 60;
@@ -105,6 +97,6 @@ void ReplayScrubber::Update()
   m_time_label->setText(QString::fromStdString(oss.str()));
 
   if (!m_slider->isSliderDown())
-    m_slider->setValue(cur_frame_idx / 60);
+    m_slider->setValue(cur_frame_idx);
   
 }
