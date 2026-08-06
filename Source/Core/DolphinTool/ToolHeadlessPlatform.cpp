@@ -101,6 +101,31 @@ void Host_TitleChanged()
 {
 }
 
+std::optional<u32> ReplayHost_ConsumeSeek()
+{
+  return std::nullopt;
+}
+
+void ReplayHost_SetTotalFrames(u32 frames)
+{
+  return;
+}
+
+void ReplayHost_SetCurrentFrame(u32 frame)
+{
+  return;
+}
+
+void ReplayHost_SetShow()
+{
+  return;
+}
+
+void ReplayHost_SetHide()
+{
+  return;
+}
+
 std::unique_ptr<GBAHostInterface> Host_CreateGBAHost(std::weak_ptr<HW::GBA::Core> core)
 {
   return nullptr;

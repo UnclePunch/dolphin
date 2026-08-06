@@ -19,8 +19,6 @@ public:
   explicit RenderWindow(QWidget* parent = nullptr);
   void showFullScreen();
   bool event(QEvent* event) override;
-  void showNormal();
-  void hide();
   RenderWidget *m_render_widget = nullptr;
 
 signals:

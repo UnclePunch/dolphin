@@ -218,6 +218,9 @@ add_library(core
   HW/EXI/EXI_DeviceStarpole.cpp
   HW/EXI/EXI.cpp
   HW/EXI/EXI.h
+  HW/EXI/Starpole/Starpole_Netplay.cpp
+  HW/EXI/Starpole/Starpole_Replay.cpp
+  HW/EXI/Starpole/Starpole_State.cpp
   HW/GBAPad.cpp
   HW/GBAPad.h
   HW/GBAPadEmu.cpp

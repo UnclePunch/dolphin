@@ -4,6 +4,8 @@
 #pragma once
 
 #include <QWidget>
+#include <QSlider>
+#include <QLabel>
 
 #include "Core/HW/EXI/EXI_DeviceStarpole.h"
 

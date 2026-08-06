@@ -4,8 +4,9 @@
 
 #pragma once
 
-#include <atomic>
+#include "Common/CommonTypes.h"
 
+#include <atomic>
 #include <QObject>
 
 // Singleton that talks to the Core via the interface defined in Core/ReplayHost.h.

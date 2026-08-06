@@ -12,6 +12,8 @@
 #include <QPushButton>
 #include <QSlider>
 #include <QTimer>
+#include <QSlider>
+#include <QLabel>
 
 ReplayScrubber::ReplayScrubber(QWidget* parent) : QWidget(parent)
 {

@@ -18,6 +18,7 @@
 #include <QScreen>
 #include <QTimer>
 #include <QWindow>
+#include <QVBoxLayout>
 
 #include "Core/Config/MainSettings.h"
 #include "Core/Core.h"
@@ -104,18 +105,6 @@ bool RenderWindow::event(QEvent* event)
     break;
   }
   return QWidget::event(event);
-}
-
-void RenderWindow::showNormal()
-{
-  m_render_widget->showNormal();
-  QWidget::showNormal();
-}
-void RenderWindow::hide()
-{
-  m_render_widget->hide();
-  m_scrubber_widget->hide();
-  QWidget::hide();
 }
 
 void RenderWindow::OnHandleChanged(void* handle)
