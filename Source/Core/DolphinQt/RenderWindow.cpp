@@ -55,6 +55,9 @@ RenderWindow::RenderWindow(QWidget* parent) : QWidget(parent)
   p.setColor(QPalette::Window, Qt::black);
   setPalette(p);
 
+  // Ensure native window support for rendering on all platforms
+  setAttribute(Qt::WA_NativeWindow);
+
   m_render_widget = new RenderWidget;
   installEventFilter(m_render_widget);
 
@@ -66,6 +69,9 @@ RenderWindow::RenderWindow(QWidget* parent) : QWidget(parent)
   layout->setSpacing(0);
   layout->addWidget(m_render_widget, 1);
   layout->addWidget(m_scrubber_widget, 0);
+
+  this->resize(640, 480);
+  // this->move(frameGeometry().center() - this->rect().center());
 
   connect(Host::GetInstance(), &Host::RequestTitle, this, &RenderWindow::setWindowTitle);
   connect(this, &RenderWindow::StateChanged, Host::GetInstance(), &Host::SetRenderFullscreen,
