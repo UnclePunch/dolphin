@@ -152,6 +152,8 @@ add_executable(dolphin-emu
   Config/Mapping/HotkeyGeneral.h
   Config/Mapping/HotkeyGraphics.cpp
   Config/Mapping/HotkeyGraphics.h
+  Config/Mapping/HotkeyStarpole.cpp
+  Config/Mapping/HotkeyStarpole.h
   Config/Mapping/HotkeyStates.cpp
   Config/Mapping/HotkeyStates.h
   Config/Mapping/HotkeyStatesOther.cpp
