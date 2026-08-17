@@ -217,6 +217,7 @@ void CEXIStarpole::Match_Send(u8* write_ptr)
   is_playback_starting = false;  // lower flag used to detect back to back replay playback
   replay_state = StarpoleReplayState::PLAYBACK;
 
+  ReplayHost_ConsumeSeek();     // remove any queued seeks
   ReplayHost_SetCurrentFrame(m_game_frame_idx);
   ReplayHost_SetTotalFrames(7 * 60 * 60);
   ReplayHost_SetShow();  // signal to show playback UI

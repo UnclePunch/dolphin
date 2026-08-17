@@ -71,6 +71,9 @@ signals:
   void SkylandersPortalHotkey();
   void InfinityBaseHotkey();
 
+  void StarpoleSeekBack();
+  void StarpoleSeekForward();
+
 private:
   void Run();
   void CheckDebuggingHotkeys();

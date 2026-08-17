@@ -123,6 +123,8 @@ private:
   void SetStateSlot(int slot);
   void IncrementSelectedStateSlot();
   void DecrementSelectedStateSlot();
+  void StarpoleSeekBack();
+  void StarpoleSeekForward();
   void BootWiiSystemMenu();
 
   void PerformOnlineUpdate(const std::string& region);
@@ -292,3 +294,5 @@ private:
   CheatsManager* m_cheats_manager{};
   QByteArray m_render_widget_geometry;
 };
+
+void ReplayHost_RequestSeek(u32 frames_to_seek);

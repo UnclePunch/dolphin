@@ -687,6 +687,11 @@ void MainWindow::ConnectHotkeys()
           &MainWindow::ShowSkylanderPortal);
   connect(m_hotkey_scheduler, &HotkeyScheduler::InfinityBaseHotkey, this,
           &MainWindow::ShowInfinityBase);
+
+  connect(m_hotkey_scheduler, &HotkeyScheduler::StarpoleSeekBack, this,
+          &MainWindow::StarpoleSeekBack);
+  connect(m_hotkey_scheduler, &HotkeyScheduler::StarpoleSeekForward, this,
+          &MainWindow::StarpoleSeekForward);
 }
 
 void MainWindow::ConnectToolBar()
@@ -1552,6 +1557,16 @@ void MainWindow::DecrementSelectedStateSlot()
   if (state_slot < 1)
     state_slot = State::NUM_STATES;
   m_menu_bar->SetStateSlot(state_slot);
+}
+
+void MainWindow::StarpoleSeekBack()
+{
+  ReplayHost_RequestSeek(-5 * 60);
+}
+
+void MainWindow::StarpoleSeekForward()
+{
+  ReplayHost_RequestSeek(5 * 60);
 }
 
 void MainWindow::PerformOnlineUpdate(const std::string& region)

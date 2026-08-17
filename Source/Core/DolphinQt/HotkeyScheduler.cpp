@@ -666,6 +666,14 @@ void HotkeyScheduler::Run()
 
     if (IsHotkey(HK_SAVE_STATE_FILE))
       emit StateSaveFile();
+
+    // Starpole
+    if (IsHotkey(HK_STARPOLE_SEEKBACK))
+      emit StarpoleSeekBack();
+
+    if (IsHotkey(HK_STARPOLE_SEEKFORWARD))
+      emit StarpoleSeekForward();
+
   }
 }
 

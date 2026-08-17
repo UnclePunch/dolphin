@@ -38,6 +38,7 @@
 #include "DolphinQt/Config/Mapping/HotkeyGBA.h"
 #include "DolphinQt/Config/Mapping/HotkeyGeneral.h"
 #include "DolphinQt/Config/Mapping/HotkeyGraphics.h"
+#include "DolphinQt/Config/Mapping/HotkeyStarpole.h"
 #include "DolphinQt/Config/Mapping/HotkeyStates.h"
 #include "DolphinQt/Config/Mapping/HotkeyStatesOther.h"
 #include "DolphinQt/Config/Mapping/HotkeyTAS.h"
@@ -505,6 +506,7 @@ void MappingWindow::SetMappingType(MappingWindow::Type type)
     AddWidget(tr("Save and Load State"), new HotkeyStates(this));
     AddWidget(tr("Other State Management"), new HotkeyStatesOther(this));
     AddWidget(tr("Game Boy Advance"), new HotkeyGBA(this));
+    AddWidget(tr("Starpole"), new HotkeyStarpole(this));
     setWindowTitle(tr("Hotkey Settings"));
     break;
   }

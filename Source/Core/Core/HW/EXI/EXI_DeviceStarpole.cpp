@@ -242,8 +242,6 @@ u32 CEXIStarpole::ImmRead(u32 size)
     // placeholder seek code
     if (replay_state == StarpoleReplayState::PLAYBACK)
     {
-      #include <windows.h>
-
       u32 cur_frame = cur_args;
 
       // if not currently seeking, check to seek
@@ -253,10 +251,6 @@ u32 CEXIStarpole::ImmRead(u32 size)
 
         if (ui_seek_frame)
           m_playback_desired_frame = ui_seek_frame;
-        else if (GetAsyncKeyState(VK_RIGHT) & 0x1)
-          m_playback_desired_frame = cur_args + (5 * 60);     // to-do: improve this, check if i have a savestate i can jump to first
-        else if (GetAsyncKeyState(VK_LEFT) & 0x1)
-          m_playback_desired_frame = cur_args - (5 * 60);
 
         // seeking, find nearest savestate
         if (m_playback_desired_frame.has_value())
@@ -522,5 +516,6 @@ ExpansionInterface::CEXIStarpole* Starpole_Get()
 
   return NULL;
 }
+
 }  // namespace ExpansionInterface
 

@@ -113,6 +113,23 @@ u32 ReplayHost_GetTotalFrames()
   return ReplayHost::GetInstance()->GetTotalFrames();
 }
 
+void ReplayHost_RequestSeek(u32 frames_to_seek)
+{
+  auto* host = ReplayHost::GetInstance();
+
+  s32 total_frames = host->GetTotalFrames();
+  u32 cur_frame = host->GetCurrentFrame();
+  s32 desired_frame = cur_frame + frames_to_seek;
+
+  // clamp
+  if (desired_frame < 0)
+    desired_frame = 0;
+  if (desired_frame > total_frames)
+    desired_frame = total_frames;
+
+  host->ReqSeek(desired_frame);
+}
+
 void ReplayHost_SetHide()
 {
   ReplayHost::GetInstance()->SetHide();

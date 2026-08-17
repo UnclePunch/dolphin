@@ -118,6 +118,7 @@
     <ClCompile Include="Config\Mapping\HotkeyGBA.cpp" />
     <ClCompile Include="Config\Mapping\HotkeyGeneral.cpp" />
     <ClCompile Include="Config\Mapping\HotkeyGraphics.cpp" />
+    <ClCompile Include="Config\Mapping\HotkeyStarpole.cpp" />
     <ClCompile Include="Config\Mapping\HotkeyStates.cpp" />
     <ClCompile Include="Config\Mapping\HotkeyStatesOther.cpp" />
     <ClCompile Include="Config\Mapping\HotkeyTAS.cpp" />
@@ -356,6 +357,7 @@
     <QtMoc Include="Config\Mapping\HotkeyGBA.h" />
     <QtMoc Include="Config\Mapping\HotkeyGeneral.h" />
     <QtMoc Include="Config\Mapping\HotkeyGraphics.h" />
+    <QtMoc Include="Config\Mapping\HotkeyStarpole.h" />
     <QtMoc Include="Config\Mapping\HotkeyStates.h" />
     <QtMoc Include="Config\Mapping\HotkeyStatesOther.h" />
     <QtMoc Include="Config\Mapping\HotkeyTAS.h" />
